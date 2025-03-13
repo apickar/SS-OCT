@@ -24,6 +24,8 @@ static char THIS_FILE[] = __FILE__;
 
 #include <thread>
 #include <stdio.h>
+#include <stdlib.h>
+
 #include <string.h>
 #include <iostream>
 #include <fstream>
@@ -36,7 +38,7 @@ static char THIS_FILE[] = __FILE__;
 #include "common.h"
 using namespace std;
 
-
+#include "Thorlabs.MotionControl.KCube.Piezo.h"
 
 #ifdef _WIN32
 #include <conio.h>
@@ -91,6 +93,11 @@ int* pSamples = (int*)pBuffer;
 int ACQUIRE_RUN = 1;
 
 int N_AVE = 1;
+int serialNo = 29251544;
+
+short voltage1 = 0;      // 0 µm
+short voltage2 = 8167;   // 5 µm (Assuming 32767 = 75 V = 20 um)
+short currentVoltage = voltage1; // Start at voltage1
 
 thread worker;
 
@@ -686,6 +693,39 @@ void AcquireData()
         {
             cout << "An exception occurred. Exception Nr. " << e << '\n';
         }
+
+        // Move the slider here
+
+        auto start = std::chrono::high_resolution_clock::now();
+
+        char testSerialNo[16];
+        sprintf_s(testSerialNo, "%d", serialNo);
+
+        if (TLI_BuildDeviceList() == 0) {
+            char serialNos[100];
+            TLI_GetDeviceListByTypeExt(serialNos, 100, 29);
+
+            if (PCC_Open(testSerialNo) == 0) {
+                PCC_StartPolling(testSerialNo, 100);
+                PCC_SetPositionControlMode(testSerialNo, PZ_ControlModeTypes::PZ_OpenLoop);
+                PCC_SetOutputVoltage(testSerialNo, currentVoltage);
+                Sleep(333);  // Wait for milliseconds before checking position
+                currentVoltage = (currentVoltage == voltage1) ? voltage2 : voltage1;
+
+                auto end = std::chrono::high_resolution_clock::now();
+
+                // Calculate the duration
+                std::chrono::duration<double> duration = end - start;
+
+                // Output the execution time in seconds
+                std::cout << "Execution time: " << duration.count() << " seconds" << std::endl;
+            }
+            //PCC_StopPolling(testSerialNo);
+            //PCC_Close(testSerialNo);
+        }
+
+        
+
     }
     //return sampleValues;
 }
@@ -956,7 +996,7 @@ void CAboutDlg::OnBnClickedOk()
        // std::terminate(worker);
         
        // AlazarClose(boardHandle);
-
+    
 
         thread worker(AcquireData);
 

@@ -193,6 +193,10 @@ float* d_waveform1;
 float* h_test = (float*)malloc(floatmem_size * 2);
 float* h_test1 = (float*)malloc(floatmem_size * 2);
 
+// Interpolation logic
+int h_flag = 0;
+int* d_flag;
+
 //Allocate host memory for result data:
 //float3* d_3D_data;
 
@@ -526,6 +530,18 @@ bool runTest(int argc, char** argv, char* ref_file)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+//! Kernel code to interleave the arrays
+////////////////////////////////////////////////////////////////////////////////
+__global__ void interleaveKernel(float* d1, float* d2, float* di, int sz)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < sz) {
+        di[2 * idx] = d1[idx];      // Even indices
+        di[2 * idx + 1] = d2[idx];  // Odd indices
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
 //! Run the Cuda part of the computation
 ////////////////////////////////////////////////////////////////////////////////
 void runCuda(struct cudaGraphicsResource** vbo_resource)
@@ -572,8 +588,59 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
     //cout << test_val << endl;
     //cout << sizeof(sampleValues)/sizeof(float) << endl;
 
-
     cudaMemcpy(d_waveform, sampleValues_copy, sizeof(float) * (DATASIZE), cudaMemcpyHostToDevice); // straight from the buffer
+
+    // Interpolate code here
+
+    // If flag == 0 set flag to 1, copy the waveform into memory, then capture next sample
+    if (h_flag == 0) {
+        h_flag = 1;
+        cudaMemcpy(d_waveform1, d_waveform, sizeof(float) * DATASIZE, cudaMemcpyDeviceToDevice);  // Copy d_waveform to d_waveform1
+        cudaMemcpy(&h_flag, d_flag, sizeof(int), cudaMemcpyDeviceToHost);
+        //cudaMemcpy(d_flag, &h_flag, sizeof(int), cudaMemcpyHostToDevice);
+        return;
+    }
+
+    // Interleave if flag == 1
+    if (h_flag == 1) {
+        // Determine size dynamically
+        const int size = sizeof(d_waveform) / sizeof(d_waveform[0]);
+
+        // Allocate device memory
+        float* d_data1, * d_data2, * d_interleaved;
+        cudaMalloc(&d_data1, size * sizeof(float));
+        cudaMalloc(&d_data2, size * sizeof(float));
+        cudaMalloc(&d_interleaved, 2 * size * sizeof(float));
+
+        // Copy input data to device
+        cudaMemcpy(d_data1, d_waveform, size * sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_data2, d_waveform1, size * sizeof(float), cudaMemcpyHostToDevice);
+
+        // Set up CUDA launch parameters
+        int threadsPerBlock = 256;
+        int blocksPerGrid = (size + threadsPerBlock - 1) / threadsPerBlock;
+        interleaveKernel << <blocksPerGrid, threadsPerBlock >> > (d_data1, d_data2, d_interleaved, size);
+        cudaDeviceSynchronize(); // Ensure execution completes
+
+        // Allocate host memory for output
+        float h_interleaved[2 * size];
+
+        // Copy back the result
+        cudaMemcpy(h_interleaved, d_interleaved, 2 * size * sizeof(float), cudaMemcpyDeviceToHost);
+
+        // // Print the result
+        // std::cout << "Interleaved Data: ";
+        // for (int i = 0; i < 2 * size; i++) {
+        //     std::cout << h_interleaved[i] << " ";
+        // }
+        // std::cout << std::endl;
+
+        // Free device memory
+        cudaFree(d_data1);
+        cudaFree(d_data2);
+        cudaFree(d_interleaved);
+
+    }
 
 
     //cudaMemcpy(d_waveform, next_frame, floatmem_size, cudaMemcpyHostToDevice);
@@ -583,6 +650,7 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
     //print_kernel << <1, 1 >> > (d_waveform);
 
     //cudaMemcpy(d_waveform, d_pinned_data, floatmem_size, cudaMemcpyHostToDevice); //pinned data form
+
     if (0) {
         d_framing1 << <framing_blocks, framing_threads >> > (d_waveform, d_waveform1);
         cudaDeviceSynchronize();
