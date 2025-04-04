@@ -56,7 +56,7 @@
 //CHANGEABLE FFT SETTINGS: (***DATA SET CANNOT BE TOO LARGE OR ELSE BATCH WILL FAIL AND NOT DO EVERY SIGNAL IN TRANSFORM***)
 #define postTriggerSamples 2000// 1000//24960; // for sure a ot less
 #define recordsPerBuffer  100// 160; // A-scan per B-scan //40000
-#define buffersPerAcquisition  200//63; // B x C scans //10000
+#define buffersPerAcquisition  100//63; // B x C scans //10000
 
 //int postTriggerSamples;
 //int recordsPerBuffer;
@@ -190,8 +190,16 @@ float* d_test1;
 cufftComplex* d_frame;
 float* d_waveform;
 float* d_waveform1;
-float* h_test = (float*)malloc(floatmem_size * 2);
+float* h_test = (float*)malloc(floatmem_size);
 float* h_test1 = (float*)malloc(floatmem_size * 2);
+
+
+__device__ int h_flag = 0;           // Device-side flag to control flow
+//__device__ int count_samples = 1;    // Device-side counter
+
+int host_count_samples = 1; // Host-side counter
+
+//__device__ int device_count_samples = 1; // Device-side count_samples
 
 //Allocate host memory for result data:
 //float3* d_3D_data;
@@ -258,7 +266,7 @@ float dx, dy;
 // mouse controls
 int mouse_old_x, mouse_old_y;
 int mouse_buttons = 0;
-float rotate_x = 30.0, rotate_y =-30.0;
+float rotate_x = 30.0, rotate_y = -30.0;
 float translate_z = -5.0; //-3.0 controls zoom in and out
 
 
@@ -274,7 +282,7 @@ float translate_z = -5.0; //-3.0 controls zoom in and out
 
 
 // MAGNITUDE KERNEL FUNCTION:
-__global__ void d_magnitude(cufftComplex* data, float4* result, int numElements, float* testdata, float* normalize_result,int CONTRAST, int N, float UPPER_NORMALIZATION_THRESHOLD, float LOWER_NORMALIZATION_THRESHOLD, int N_AVE) {
+__global__ void d_magnitude(cufftComplex* data, float4* result, int numElements, float* testdata, float* normalize_result, int CONTRAST, int N, float UPPER_NORMALIZATION_THRESHOLD, float LOWER_NORMALIZATION_THRESHOLD, int N_AVE) {
 
     int j = blockDim.x * blockIdx.x + threadIdx.x;
     int i = (NX * blockIdx.x) + (DC_CUT_OFFSET)+threadIdx.x; //where the first term "410" is the period of each fft and third term "11" is how much to offset - 1 so in this case the offset is actually 12 to get rid of DC portion of FFT.
@@ -305,7 +313,7 @@ __global__ void d_magnitude(cufftComplex* data, float4* result, int numElements,
             result[j] = make_float4(0.7f, 0.498039f, 0.196078f, test1); //GOLD
         }
         else if (N < N_AVE) {
-            testdata[j] = (testdata[j]+ test1);
+            testdata[j] = (testdata[j] + test1);
             //printf("%f. \n", testdata[j]);
             result[j] = make_float4(0.7f, 0.498039f, 0.196078f, normalize_result[j]); //GOLD result[j] = normalize_result[j];
         }
@@ -315,9 +323,9 @@ __global__ void d_magnitude(cufftComplex* data, float4* result, int numElements,
             testdata[j] = 0;
         }
 
-        
-           
-       
+
+
+
 
 
         //result[j] = make_float4(0.7f, 0.498039f, 0.196078f, (((hypotf(data[i].x, data[i].y)) / FFT_DATA_MAXIMUM_VALUE))); //GOLD
@@ -336,7 +344,7 @@ __global__ void d_magnitude(cufftComplex* data, float4* result, int numElements,
 
         //normalize_result[j] = (hypotf(data[i].x, data[i].y)) / FFT_DATA_MAXIMUM_VALUE;																												   //result[j] = make_float4(0.858824f, 0.858824f, 0.439216f, (((hypotf(data[i].x, data[i].y)) / (FFT_DATA_MAXIMUM_VALUE)) * 1.0f)); //LIGHT GOLD
         //testdata[j] = ((hypotf(data[i].x, data[i].y)) / FFT_DATA_MAXIMUM_VALUE);
-        
+
         //testdata[j] = data[i].x;
     //}
     //else if ((((hypotf(data[i].x, data[i].y)) / FFT_DATA_MAXIMUM_VALUE) * 1.0f) <= 0.7f) {
@@ -411,10 +419,10 @@ __global__ void d_framing2(double determinedPeriod, float* waveform, cufftComple
     //printf("TST! = %f\n",(float)waveform[500]);
 
     if (q % 2 == 0) {
-        if ( q == 0) {
-            h_data[(int)(q / 2)].x = waveform[q] ;
+        if (q == 0) {
+            h_data[(int)(q / 2)].x = waveform[q];
             h_data[(int)(q / 2)].y = 0;
-            waveform1[(int)(q / 2)] = waveform[q] ;
+            waveform1[(int)(q / 2)] = waveform[q];
         }
         else {
             h_data[(int)(q / 2)].x = (waveform[q] + waveform[q - 1]) / 2.0;
@@ -494,7 +502,7 @@ bool runTest(int argc, char** argv, char* ref_file)
 
     //3D CUBE STUFF:
         // Create buffer object
-  
+
     //glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 3, 0);
 
     // Create VBO
@@ -507,7 +515,7 @@ bool runTest(int argc, char** argv, char* ref_file)
     //glutMotionFunc(motion);
 
 
-  
+
 
 
     //long FFTstart = clock();
@@ -524,6 +532,18 @@ bool runTest(int argc, char** argv, char* ref_file)
 
     return true;
 }
+
+// Kernel to increment the counter (atomic operation)
+/*
+__global__ void increment_counter_kernel() {
+    atomicAdd(&count_samples, 1);  // Safely increment the counter on the device
+
+    // Print from thread 0 to avoid messy output
+    if (threadIdx.x == 0) {
+        printf("Device count_samples incremented: %d\n", count_samples);
+    }
+}
+*/
 
 ////////////////////////////////////////////////////////////////////////////////
 //! Run the Cuda part of the computation
@@ -552,7 +572,7 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
     if (0) {
         ofstream myout;
 
-        myout.open("FFT_Output1.dat");
+        myout.open("Output1_2.dat");
 
         for (uint32_t i = 0; i < DATASIZE; i++) {
 
@@ -572,102 +592,82 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
     //cout << test_val << endl;
     //cout << sizeof(sampleValues)/sizeof(float) << endl;
 
+    cudaDeviceSynchronize();
 
     cudaMemcpy(d_waveform, sampleValues_copy, sizeof(float) * (DATASIZE), cudaMemcpyHostToDevice); // straight from the buffer
+    cudaDeviceSynchronize();
+    cudaError_t err;
 
-    // Interpolate code here
- 
-    // If flag == 0 set flag to 1, copy the waveform into memory, then capture next sample
+    err = cudaMemcpy(h_test, d_waveform, floatmem_size, cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
+
+    if (err != cudaSuccess) {
+        printf("cudaMemcpy failed: %s\n", cudaGetErrorString(err));
+    }
+
+    printf("After cudaMemcpy, sample values: %f %f %f\n", h_test[0], h_test[10], h_test[1000000]);
+
+
+
+
+
+
+    // Copy the value of count_samples from device to host
+    //cudaMemcpy(&host_count_samples, &count_samples, sizeof(int), cudaMemcpyDeviceToHost);
+
+    // Print the initial value from the host before kernel execution
+    //printf("Initial Host count_samples: %d\n", host_count_samples);
+
+    // Launch kernel to increment count_samples atomically if conditions are met
+    // if (h_flag == 0 && host_count_samples < 4) {
     if (h_flag == 0) {
-        h_flag = 1;
-        cudaMemcpy(d_waveform1, d_waveform, sizeof(float) * DATASIZE, cudaMemcpyDeviceToDevice);  // Copy d_waveform to d_waveform1
-        cudaMemcpy(&h_flag, d_flag, sizeof(int), cudaMemcpyDeviceToHost);
+        //increment_counter_kernel << <1, 1 >> > ();
+        //cudaDeviceSynchronize(); // Wait for kernel to finish
+        host_count_samples++;
 
-        if (1) {
+        // Copy the updated value of count_samples from device to host
+        //cudaError_t err;
+        //cudaMemcpy(&host_count_samples, &count_samples, sizeof(int), cudaMemcpyDeviceToHost);
+        //cudaDeviceSynchronize(); // Wait for kernel to finish
+
+        //if (err != cudaSuccess) {
+            //printf("cudaMemcpy failed: %s\n", cudaGetErrorString(err));
+        //}
+
+        // Print the updated value of count_samples from host after increment
+        printf("Host count_samples after increment: %d\n", host_count_samples);
+
+        return;  // Return if conditions met, no further processing
+    }
+
+    /*
+    if (h_flag == 0 && host_count_samples == 4) {
+
+        if (0) {
+
+
             ofstream myout;
-    
-            myout.open("FFT_Output1.dat");
-    
+
+            myout.open("output_raw_data.dat");
+
             for (uint32_t i = 0; i < DATASIZE; i++) {
-    
+
                 //Print data to dat file:
-                myout << i << " " << (float)sampleValues_copy[i] << endl;
+                myout << i << " " << (float)h_test[i] << endl;
                 //myout << i << " " << i] << endl;
                 //printf("i = %d\n", i);
-    
-            }
-    
-            myout.close();
-            //Display finish message:
-            cout << "Finished!" << endl;
-    
-        }
 
-        //cudaMemcpy(d_flag, &h_flag, sizeof(int), cudaMemcpyHostToDevice);
-        return;
-    }
- 
-    // Interleave if flag == 1
-    if (h_flag == 1) {
-        // Determine size dynamically
-        const int size = sizeof(d_waveform) / sizeof(d_waveform[0]);
- 
-        // Allocate device memory
-        float* d_data1, * d_data2, * d_interleaved;
-        cudaMalloc(&d_data1, size * sizeof(float));
-        cudaMalloc(&d_data2, size * sizeof(float));
-        cudaMalloc(&d_interleaved, 2 * size * sizeof(float));
- 
-        // Copy input data to device
-        cudaMemcpy(d_data1, d_waveform, size * sizeof(float), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_data2, d_waveform1, size * sizeof(float), cudaMemcpyHostToDevice);
- 
-        // Set up CUDA launch parameters
-        int threadsPerBlock = 256;
-        int blocksPerGrid = (size + threadsPerBlock - 1) / threadsPerBlock;
-        interleaveKernel << <blocksPerGrid, threadsPerBlock >> > (d_data1, d_data2, d_interleaved, size);
-        cudaDeviceSynchronize(); // Ensure execution completes
- 
-        // Allocate host memory for output
-        float h_interleaved[2 * size];
- 
-        // Copy back the result
-        cudaMemcpy(h_interleaved, d_interleaved, 2 * size * sizeof(float), cudaMemcpyDeviceToHost);
-
-        if (1) {
-            ofstream myout;
-    
-            myout.open("FFT_Output1.dat");
-    
-            for (uint32_t i = 0; i < DATASIZE; i++) {
-    
-                //Print data to dat file:
-                myout << i << " " << (float)sampleValues_copy[i] << endl;
-                //myout << i << " " << i] << endl;
-                //printf("i = %d\n", i);
-    
             }
-    
+
             myout.close();
-            //Display finish message:
-            cout << "Finished!" << endl;
-    
+
+
+            // Set the flag to 1
+            h_flag = 1;
+            return;  // Return after saving waveform and setting flag
         }
- 
-        // // Print the result
-        // std::cout << "Interleaved Data: ";
-        // for (int i = 0; i < 2 * size; i++) {
-        //     std::cout << h_interleaved[i] << " ";
-        // }
-        // std::cout << std::endl;
- 
-        // Free device memory
-        cudaFree(d_data1);
-        cudaFree(d_data2);
-        cudaFree(d_interleaved);
- 
     }
-}
+    */
 
     //cudaMemcpy(d_waveform, next_frame, floatmem_size, cudaMemcpyHostToDevice);
     //cudaMemcpy(h_test1, d_waveform, floatmem_size, cudaMemcpyDeviceToHost);
@@ -755,17 +755,17 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
         MessageBox(0, buffer, "Title", MB_OK);
     }
 
-    cudaMemcpy( d_test, h_test, floatmem_size1, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_test, h_test, floatmem_size1, cudaMemcpyHostToDevice);
     cudaMemcpy(d_normalize, h_test1, floatmem_size1, cudaMemcpyHostToDevice);
     //d_test = d_test1;
     if (determinedPeriod > 1000) // i.e. determinedPeriod = 2000
-        d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, (int)(DATASIZE / 2), d_test, d_normalize, CONTRAST, N , UPPER_NORMALIZATION_THRESHOLD,  LOWER_NORMALIZATION_THRESHOLD, N_AVE);
+        d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, (int)(DATASIZE / 2), d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
     else
-        d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, DATASIZE, d_test, d_normalize, CONTRAST, N,UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
+        d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, DATASIZE, d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
 
     if (N == N_AVE) { N = 1; }
     else { N = N + 1; }
-   
+
     //d_test1 = d_test;
     cudaMemcpy(h_test, d_test, floatmem_size1, cudaMemcpyDeviceToHost);
     cudaMemcpy(h_test1, d_normalize, floatmem_size1, cudaMemcpyDeviceToHost);
@@ -949,7 +949,7 @@ bool initGL(int* argc, char** argv)
     }
 
     if (1) {
-        WindowID2 = glutCreateSubWindow(WindowID0, 2*window_width, 0, window_width , window_height );// window_width * 2, window_height * 2, window_width, window_height);
+        WindowID2 = glutCreateSubWindow(WindowID0, 2 * window_width, 0, window_width, window_height);// window_width * 2, window_height * 2, window_width, window_height);
         //glOrtho(0.0f, window_height, window_height, 0.0f, 0.0f, 1.0f);
         //glutSetWindow(WindowID2);
         glutDisplayFunc(display1);
@@ -973,8 +973,8 @@ bool initGL(int* argc, char** argv)
             fflush(stderr);
             return false;
         }
-        
-        
+
+
 
         glGenBuffers(1, &vbopositions);
         glBindBuffer(GL_ARRAY_BUFFER, vbopositions);
@@ -1011,80 +1011,80 @@ bool initGL(int* argc, char** argv)
 
 
     if (1) {
-            //glutInitWindowSize(window_width, window_height);
-            //glutInitWindowPosition(OCT_COMNTROL_width + window_width, window_height + 30);
-            WindowID1 = glutCreateSubWindow(WindowID0, 0, 0, window_width * 2, window_height * 2);
-            //WindowID4 = glutCreateWindow("OCT Z view");
-            //glutSetWindow(WindowID2);
-            glutDisplayFunc(display);
+        //glutInitWindowSize(window_width, window_height);
+        //glutInitWindowPosition(OCT_COMNTROL_width + window_width, window_height + 30);
+        WindowID1 = glutCreateSubWindow(WindowID0, 0, 0, window_width * 2, window_height * 2);
+        //WindowID4 = glutCreateWindow("OCT Z view");
+        //glutSetWindow(WindowID2);
+        glutDisplayFunc(display);
 
-            //glutDisplayFunc(display);
-            glutKeyboardFunc(keyboard);
-            glutMouseFunc(mouse);
-            glutMotionFunc(motion);
-            //glutKeyboardFunc(keyboard);
-            //glutMotionFunc(motion);
-
-
-            //glutSetWindow(WindowID3);
+        //glutDisplayFunc(display);
+        glutKeyboardFunc(keyboard);
+        glutMouseFunc(mouse);
+        glutMotionFunc(motion);
+        //glutKeyboardFunc(keyboard);
+        //glutMotionFunc(motion);
 
 
-            glutTimerFunc(REFRESH_DELAY, timerEvent, 0);
+        //glutSetWindow(WindowID3);
 
-            // initialize necessary OpenGL extensions
-            if (!isGLVersionSupported(2, 0))
-            {
-                fprintf(stderr, "ERROR: Support for necessary OpenGL extensions missing.");
-                fflush(stderr);
-                return false;
-            }
 
-            
-            glGenBuffers(1, &vbopositions);
-            glBindBuffer(GL_ARRAY_BUFFER, vbopositions);
-            glBufferData(GL_ARRAY_BUFFER, TOTAL * sizeof(float), positions, GL_STATIC_DRAW);
+        glutTimerFunc(REFRESH_DELAY, timerEvent, 0);
 
-            glGenBuffers(1, &vbocolors);
-            glBindBuffer(GL_ARRAY_BUFFER, vbocolors);
-            glBufferData(GL_ARRAY_BUFFER, TOTAL * sizeof(float), positions, GL_STREAM_DRAW);
-
-            createVBO(&vbo, &cuda_vbo_resource, cudaGraphicsMapFlagsWriteDiscard);
-
-            // Tell code which buffer represent positions and which represent color:
-            glBindBuffer(GL_ARRAY_BUFFER, vbopositions);
-            glVertexPointer(3, GL_FLOAT, sizeof(float) * 3, 0);
-            glBindBuffer(GL_ARRAY_BUFFER, vbo);
-            glColorPointer(4, GL_FLOAT, sizeof(float) * 4, 0);
-
-            if (0) {
-                glClipPlane(GL_CLIP_PLANE0, eqn);
-                glEnable(GL_CLIP_PLANE0);
-                glClipPlane(GL_CLIP_PLANE1, eqn2);
-                glEnable(GL_CLIP_PLANE1);
-                glClipPlane(GL_CLIP_PLANE2, eqn3);
-                //glEnable(GL_CLIP_PLANE2);
-                glClipPlane(GL_CLIP_PLANE3, eqn4);
-                //glEnable(GL_CLIP_PLANE3);
-                glClipPlane(GL_CLIP_PLANE4, eqn5);
-                //glEnable(GL_CLIP_PLANE4);
-                glClipPlane(GL_CLIP_PLANE5, eqn6);
-                //glEnable(GL_CLIP_PLANE5);
-            }
-            
-
+        // initialize necessary OpenGL extensions
+        if (!isGLVersionSupported(2, 0))
+        {
+            fprintf(stderr, "ERROR: Support for necessary OpenGL extensions missing.");
+            fflush(stderr);
+            return false;
         }
 
- 
-        // start rendering mainloop
-        glutMainLoop();
 
-        return true;
-    
+        glGenBuffers(1, &vbopositions);
+        glBindBuffer(GL_ARRAY_BUFFER, vbopositions);
+        glBufferData(GL_ARRAY_BUFFER, TOTAL * sizeof(float), positions, GL_STATIC_DRAW);
+
+        glGenBuffers(1, &vbocolors);
+        glBindBuffer(GL_ARRAY_BUFFER, vbocolors);
+        glBufferData(GL_ARRAY_BUFFER, TOTAL * sizeof(float), positions, GL_STREAM_DRAW);
+
+        createVBO(&vbo, &cuda_vbo_resource, cudaGraphicsMapFlagsWriteDiscard);
+
+        // Tell code which buffer represent positions and which represent color:
+        glBindBuffer(GL_ARRAY_BUFFER, vbopositions);
+        glVertexPointer(3, GL_FLOAT, sizeof(float) * 3, 0);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glColorPointer(4, GL_FLOAT, sizeof(float) * 4, 0);
+
+        if (0) {
+            glClipPlane(GL_CLIP_PLANE0, eqn);
+            glEnable(GL_CLIP_PLANE0);
+            glClipPlane(GL_CLIP_PLANE1, eqn2);
+            glEnable(GL_CLIP_PLANE1);
+            glClipPlane(GL_CLIP_PLANE2, eqn3);
+            //glEnable(GL_CLIP_PLANE2);
+            glClipPlane(GL_CLIP_PLANE3, eqn4);
+            //glEnable(GL_CLIP_PLANE3);
+            glClipPlane(GL_CLIP_PLANE4, eqn5);
+            //glEnable(GL_CLIP_PLANE4);
+            glClipPlane(GL_CLIP_PLANE5, eqn6);
+            //glEnable(GL_CLIP_PLANE5);
+        }
+
+
+    }
+
+
+    // start rendering mainloop
+    glutMainLoop();
+
+    return true;
+
 }
 
 void display()
 {
-    
+
 
     glutSetWindow(WindowID1);
     //TEST:
@@ -1146,7 +1146,7 @@ void display()
     glRotatef(rotate_y, 0.0, 0.5, 0.0);
     glRotatef(90.0, 0.0, 0.0, 0.5);
 
-    
+
 
     glEnableClientState(GL_VERTEX_ARRAY);
     glEnableClientState(GL_COLOR_ARRAY);
@@ -1197,10 +1197,10 @@ void display()
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     //glBindBuffer(GL_ARRAY_BUFFER, vbo);
     //glBufferData(GL_ARRAY_BUFFER, COLORTOTAL * sizeof(float), h_test, GL_STREAM_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER,0, COLORTOTAL * sizeof(float), h_test);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, COLORTOTAL * sizeof(float), h_test);
     //printf("color = %f\n",(float) colors[500]);
 
-    
+
 
     glFlush();
 
@@ -1276,7 +1276,7 @@ void display1()
     // set view matrix
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    glTranslatef(0,0, translate_z);
+    glTranslatef(0, 0, translate_z);
     glRotatef(rotate_x, 0.5, 0.0, 0.0);
     glRotatef(rotate_y, 0.0, 0.5, 0.0);
     glRotatef(90.0, 0.0, 0.0, 0.5);
@@ -1438,6 +1438,7 @@ void keyboard(unsigned char key, int /*x*/, int /*y*/)
         cudaFree(d_data);
         cudaFree(d_sharedresult);
         cudaFree(d_normalize);
+        //cudaFree(device_count_samples);
         //free(h_calcdata);
         free(h_sharedresult);
         //free(h_data);
@@ -1651,6 +1652,9 @@ void kernel(int argc, char* argv[]) {
     cudaMalloc((void**)&d_frame, mem_size);
     cudaMalloc((void**)&d_waveform, floatmem_size);
     cudaMalloc((void**)&d_waveform1, floatmem_size);
+
+    //cudaMalloc((void**)&device_count_samples, sizeof(int));
+
     //cudaMemcpy(d_waveform, waveform, floatmem_size, cudaMemcpyHostToDevice);
 
     //Allocate host memory for result data:
@@ -1788,4 +1792,3 @@ void kernel(int argc, char* argv[]) {
 
 
 }
-
