@@ -629,11 +629,13 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
     // If they are different, check if the h_flag is 0 or 1
     // If h_flag is 0, set the flag to 1, save the current array, then return
     // If h_flag is 1, set the flag to 0, then interleave the two unique arrays
-    if (h_unique[0] == h_test[0]) {
+    if (h_unique[0] != h_test[0]) {
 
         if (h_flag == 0) {
             cudaMemcpy(h_unique, d_waveform, floatmem_size, cudaMemcpyDeviceToHost);
+            printf("H_flag is: %d\n", h_flag);
             h_flag = 1;
+            printf("H_flag updated to: %d\n", h_flag);
 
             // Copy interleaved array to h_test2 to view on MATLAB
             err = cudaMemcpy(h_test2, d_waveform, floatmem_size, cudaMemcpyDeviceToHost);
@@ -673,8 +675,9 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
         }
 
         if (h_flag == 1) {
-        
+            printf("H_flag is: %d\n", h_flag);
             h_flag = 0;
+            printf("H_flag updated to: %d\n", h_flag);
 
             // Interleave the two arrays (d_waveform1 has the previous sample & d_waveform has the current sample)
             interleaveKernel << <blocksPerGrid, threadsPerBlock >> > (d_waveform1, d_waveform, d_interleaved, DATASIZE);
@@ -716,10 +719,13 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
         
         }
         else {
+            //printf("H_flag is: %d\n", h_flag);
             return;
         }
     }
     else {
+        //printf("Sample values: %f %f %f\n", h_test[0], h_test[10], h_test[1000000]);
+        //printf("Unique values: %f %f %f\n", h_unique[0], h_unique[10], h_unique[1000000]);
         return;
     }
     
