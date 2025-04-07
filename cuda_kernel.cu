@@ -192,8 +192,19 @@ float* d_waveform;
 float* d_waveform1;
 float* h_test = (float*)malloc(floatmem_size);
 float* h_test1 = (float*)malloc(floatmem_size * 2);
+float* d_interleaved;
+float* h_test2 = (float*)malloc(sizeof(float) * DATASIZE);
+
+// Allocate host memory for output
+float* h_interleaved = (float*)malloc(sizeof(float) * 2 * DATASIZE);
+
+// Kernel setup
+int threadsPerBlock = 256;
+int blocksPerGrid = (2 * DATASIZE + threadsPerBlock - 1) / threadsPerBlock;
 
 
+// Interpolation logic (global)
+__device__ int d_flag = 0;  // Flag stored in device memory
 __device__ int h_flag = 0;           // Device-side flag to control flow
 //__device__ int count_samples = 1;    // Device-side counter
 
@@ -546,6 +557,30 @@ __global__ void increment_counter_kernel() {
 */
 
 ////////////////////////////////////////////////////////////////////////////////
+//! Kernel code to interleave the arrays
+////////////////////////////////////////////////////////////////////////////////
+__global__ void interleaveKernel(float* d1, float* d2, float* di, int sz)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < sz) {
+        di[2 * idx] = d1[idx];      // Even indices
+        di[2 * idx + 1] = d2[idx];  // Odd indices
+    }
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+//! Kernel code to set flags
+////////////////////////////////////////////////////////////////////////////////
+__global__ void setFlagtoOne() {
+    d_flag = 1;
+}
+
+__global__ void setFlagtoZero() {
+    d_flag = 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 //! Run the Cuda part of the computation
 ////////////////////////////////////////////////////////////////////////////////
 void runCuda(struct cudaGraphicsResource** vbo_resource)
@@ -642,31 +677,77 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
 
     /*
     if (h_flag == 0 && host_count_samples == 4) {
+        // Set the flag to 1
+        setFlagtoOne << <1, 1 >> > ();
+        cudaDeviceSynchronize();
 
+        // Copy flag back from device to host
+        cudaMemcpyFromSymbol(&h_flag, d_flag, sizeof(int), 0, cudaMemcpyDeviceToHost);
+
+        // Copy interleaved array to h_test2 to view on MATLAB
+        cudaMemcpy(h_test2, d_waveform, floatmem_size, cudaMemcpyDeviceToHost);
+        cudaDeviceSynchronize();
+
+        // Copy first waveform to d_waveform1
+        cudaMemcpy(d_waveform1, d_waveform, sizeof(float) * DATASIZE, cudaMemcpyDeviceToDevice);
+        cudaDeviceSynchronize();
+
+        // Test on MATLAB to view raw data
         if (0) {
-
-
             ofstream myout;
-
-            myout.open("output_raw_data.dat");
+            myout.open("Output_no_interleave.dat");
 
             for (uint32_t i = 0; i < DATASIZE; i++) {
+                // Print data to a .dat file
+                myout << i << " " << (float)h_test2[i] << endl;
+            }
+
+            myout.close();
+            // Display finish message
+            cout << "Finished!" << endl;
+        }
+
+        return;  // Return after saving waveform and setting flag
+    }
+
+    // Interleave if flag == 1
+    if (h_flag == 1 && host_count_samples > 4) {
+        // Reset the flag back to 0
+        setFlagtoZero << <1, 1 >> > (); // Set flag on GPU
+        cudaDeviceSynchronize();
+
+        // Copy flag back from device to host
+        cudaMemcpyFromSymbol(&h_flag, d_flag, sizeof(int), 0, cudaMemcpyDeviceToHost);
+
+        // Interleave the two arrays (d_waveform1 has the previous sample & d_waveform has the current sample)
+        interleaveKernel << <blocksPerGrid, threadsPerBlock >> > (d_waveform1, d_waveform, d_interleaved, DATASIZE);
+        cudaDeviceSynchronize();
+
+        // Copy interleaved array to h_interleaved to view on MATLAB
+        cudaMemcpy(h_interleaved, d_interleaved, 2 * floatmem_size, cudaMemcpyDeviceToHost);
+        cudaDeviceSynchronize();
+
+        // Test on MATLAB to view raw data
+        if (0) {
+            ofstream myout;
+
+            myout.open("Output_interleaved.dat");
+
+            for (uint32_t i = 0; i < 2 * DATASIZE; i++) {
 
                 //Print data to dat file:
-                myout << i << " " << (float)h_test[i] << endl;
+                myout << i << " " << (float)h_interleaved[i] << endl;
                 //myout << i << " " << i] << endl;
                 //printf("i = %d\n", i);
 
             }
 
             myout.close();
+            //Display finish message:
+            cout << "Finished!" << endl;
 
-
-            // Set the flag to 1
-            h_flag = 1;
-            return;  // Return after saving waveform and setting flag
         }
-    }
+
     */
 
     //cudaMemcpy(d_waveform, next_frame, floatmem_size, cudaMemcpyHostToDevice);
