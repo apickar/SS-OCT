@@ -192,23 +192,22 @@ float* d_waveform;
 float* d_waveform1;
 float* h_test = (float*)malloc(floatmem_size);
 float* h_test1 = (float*)malloc(floatmem_size * 2);
-float* d_interleaved;
-float* h_test2 = (float*)malloc(sizeof(float) * DATASIZE);
+float* h_test2 = (float*)malloc(floatmem_size);
+float* h_unique = (float*)malloc(floatmem_size);
 
-// Allocate host memory for output
+// Allocate host memory for interleaved array
 float* h_interleaved = (float*)malloc(sizeof(float) * 2 * DATASIZE);
+float* d_interleaved;
 
 // Kernel setup
 int threadsPerBlock = 256;
 int blocksPerGrid = (2 * DATASIZE + threadsPerBlock - 1) / threadsPerBlock;
 
-
-// Interpolation logic (global)
-__device__ int d_flag = 0;  // Flag stored in device memory
-__device__ int h_flag = 0;           // Device-side flag to control flow
+int h_flag = 0;
+//__device__ int h_flag = 0;           // Device-side flag to control flow
 //__device__ int count_samples = 1;    // Device-side counter
 
-int host_count_samples = 1; // Host-side counter
+int gpu_count_samples = 1; // GPU-side counter
 
 //__device__ int device_count_samples = 1; // Device-side count_samples
 
@@ -544,18 +543,6 @@ bool runTest(int argc, char** argv, char* ref_file)
     return true;
 }
 
-// Kernel to increment the counter (atomic operation)
-/*
-__global__ void increment_counter_kernel() {
-    atomicAdd(&count_samples, 1);  // Safely increment the counter on the device
-
-    // Print from thread 0 to avoid messy output
-    if (threadIdx.x == 0) {
-        printf("Device count_samples incremented: %d\n", count_samples);
-    }
-}
-*/
-
 ////////////////////////////////////////////////////////////////////////////////
 //! Kernel code to interleave the arrays
 ////////////////////////////////////////////////////////////////////////////////
@@ -566,18 +553,6 @@ __global__ void interleaveKernel(float* d1, float* d2, float* di, int sz)
         di[2 * idx] = d1[idx];      // Even indices
         di[2 * idx + 1] = d2[idx];  // Odd indices
     }
-}
-
-
-////////////////////////////////////////////////////////////////////////////////
-//! Kernel code to set flags
-////////////////////////////////////////////////////////////////////////////////
-__global__ void setFlagtoOne() {
-    d_flag = 1;
-}
-
-__global__ void setFlagtoZero() {
-    d_flag = 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -637,126 +612,118 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
     cudaDeviceSynchronize();
 
     if (err != cudaSuccess) {
-        printf("cudaMemcpy failed: %s\n", cudaGetErrorString(err));
-    }
-
-    printf("After cudaMemcpy, sample values: %f %f %f\n", h_test[0], h_test[10], h_test[1000000]);
-
-
-
-
-
-
-    // Copy the value of count_samples from device to host
-    //cudaMemcpy(&host_count_samples, &count_samples, sizeof(int), cudaMemcpyDeviceToHost);
-
-    // Print the initial value from the host before kernel execution
-    //printf("Initial Host count_samples: %d\n", host_count_samples);
-
-    // Launch kernel to increment count_samples atomically if conditions are met
-    // if (h_flag == 0 && host_count_samples < 4) {
-    if (h_flag == 0) {
-        //increment_counter_kernel << <1, 1 >> > ();
-        //cudaDeviceSynchronize(); // Wait for kernel to finish
-        host_count_samples++;
-
-        // Copy the updated value of count_samples from device to host
-        //cudaError_t err;
-        //cudaMemcpy(&host_count_samples, &count_samples, sizeof(int), cudaMemcpyDeviceToHost);
-        //cudaDeviceSynchronize(); // Wait for kernel to finish
-
-        //if (err != cudaSuccess) {
-            //printf("cudaMemcpy failed: %s\n", cudaGetErrorString(err));
-        //}
-
-        // Print the updated value of count_samples from host after increment
-        printf("Host count_samples after increment: %d\n", host_count_samples);
-
-        return;  // Return if conditions met, no further processing
+        printf("cudaMemcpy 1 failed: %s\n", cudaGetErrorString(err));
     }
 
     /*
-    if (h_flag == 0 && host_count_samples == 4) {
-        // Set the flag to 1
-        setFlagtoOne << <1, 1 >> > ();
-        cudaDeviceSynchronize();
-
-        // Copy flag back from device to host
-        cudaMemcpyFromSymbol(&h_flag, d_flag, sizeof(int), 0, cudaMemcpyDeviceToHost);
-
-        // Copy interleaved array to h_test2 to view on MATLAB
-        cudaMemcpy(h_test2, d_waveform, floatmem_size, cudaMemcpyDeviceToHost);
-        cudaDeviceSynchronize();
-
-        // Copy first waveform to d_waveform1
-        cudaMemcpy(d_waveform1, d_waveform, sizeof(float) * DATASIZE, cudaMemcpyDeviceToDevice);
-        cudaDeviceSynchronize();
-
-        // Test on MATLAB to view raw data
-        if (0) {
-            ofstream myout;
-            myout.open("Output_no_interleave.dat");
-
-            for (uint32_t i = 0; i < DATASIZE; i++) {
-                // Print data to a .dat file
-                myout << i << " " << (float)h_test2[i] << endl;
-            }
-
-            myout.close();
-            // Display finish message
-            cout << "Finished!" << endl;
-        }
-
-        return;  // Return after saving waveform and setting flag
+    err = cudaMemcpy(h_unique, d_waveform, floatmem_size, cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess) {
+        printf("cudaMemcpy 2 failed: %s\n", cudaGetErrorString(err));
     }
-
-    // Interleave if flag == 1
-    if (h_flag == 1 && host_count_samples > 4) {
-        // Reset the flag back to 0
-        setFlagtoZero << <1, 1 >> > (); // Set flag on GPU
-        cudaDeviceSynchronize();
-
-        // Copy flag back from device to host
-        cudaMemcpyFromSymbol(&h_flag, d_flag, sizeof(int), 0, cudaMemcpyDeviceToHost);
-
-        // Interleave the two arrays (d_waveform1 has the previous sample & d_waveform has the current sample)
-        interleaveKernel << <blocksPerGrid, threadsPerBlock >> > (d_waveform1, d_waveform, d_interleaved, DATASIZE);
-        cudaDeviceSynchronize();
-
-        // Copy interleaved array to h_interleaved to view on MATLAB
-        cudaMemcpy(h_interleaved, d_interleaved, 2 * floatmem_size, cudaMemcpyDeviceToHost);
-        cudaDeviceSynchronize();
-
-        // Test on MATLAB to view raw data
-        if (0) {
-            ofstream myout;
-
-            myout.open("Output_interleaved.dat");
-
-            for (uint32_t i = 0; i < 2 * DATASIZE; i++) {
-
-                //Print data to dat file:
-                myout << i << " " << (float)h_interleaved[i] << endl;
-                //myout << i << " " << i] << endl;
-                //printf("i = %d\n", i);
-
-            }
-
-            myout.close();
-            //Display finish message:
-            cout << "Finished!" << endl;
-
-        }
-
     */
 
-    //cudaMemcpy(d_waveform, next_frame, floatmem_size, cudaMemcpyHostToDevice);
-    //cudaMemcpy(h_test1, d_waveform, floatmem_size, cudaMemcpyDeviceToHost);
-    //printf("h_test 1 = %.20f\n", h_test1[500]);
+    //printf("After cudaMemcpy, sample values: %f %f %f\n", h_test[0], h_test[10], h_test[1000000]);
 
-    //print_kernel << <1, 1 >> > (d_waveform);
+    // Compare the latest unique h_test array (h_unique) with the current h_test array
+    // If they are the same, do nothing (return)
+    // If they are different, check if the h_flag is 0 or 1
+    // If h_flag is 0, set the flag to 1, save the current array, then return
+    // If h_flag is 1, set the flag to 0, then interleave the two unique arrays
+    if (h_unique[0] == h_test[0]) {
 
-    //cudaMemcpy(d_waveform, d_pinned_data, floatmem_size, cudaMemcpyHostToDevice); //pinned data form
+        if (h_flag == 0) {
+            cudaMemcpy(h_unique, d_waveform, floatmem_size, cudaMemcpyDeviceToHost);
+            h_flag = 1;
+
+            // Copy interleaved array to h_test2 to view on MATLAB
+            err = cudaMemcpy(h_test2, d_waveform, floatmem_size, cudaMemcpyDeviceToHost);
+            cudaDeviceSynchronize();
+
+            if (err != cudaSuccess) {
+                printf("cudaMemcpy 3 failed: %s\n", cudaGetErrorString(err));
+            }
+
+            printf("After cudaMemcpy, sample values: %f %f %f\n", h_test2[0], h_test2[10], h_test2[1000000]);
+
+            // Copy first waveform to d_waveform1
+            err = cudaMemcpy(d_waveform1, d_waveform, sizeof(float) * DATASIZE, cudaMemcpyDeviceToDevice);
+            cudaDeviceSynchronize();
+
+            if (err != cudaSuccess) {
+                printf("cudaMemcpy 4 failed: %s\n", cudaGetErrorString(err));
+            }
+
+            // Test on MATLAB to view raw data
+            if (0) {
+                ofstream myout;
+                myout.open("Output_no_interleave.dat");
+
+                for (uint32_t i = 0; i < DATASIZE; i++) {
+                    // Print data to a .dat file
+                    myout << i << " " << (float)h_test2[i] << endl;
+                }
+
+                myout.close();
+                // Display finish message
+                cout << "Finished!" << endl;
+            }
+
+            return;  // Return after saving waveform and setting flag
+
+        }
+
+        if (h_flag == 1) {
+        
+            h_flag = 0;
+
+            // Interleave the two arrays (d_waveform1 has the previous sample & d_waveform has the current sample)
+            interleaveKernel << <blocksPerGrid, threadsPerBlock >> > (d_waveform1, d_waveform, d_interleaved, DATASIZE);
+            cudaDeviceSynchronize();
+
+            // Copy interleaved array to h_interleaved to view on MATLAB
+            err = cudaMemcpy(h_interleaved, d_interleaved, 2 * floatmem_size, cudaMemcpyDeviceToHost);
+            cudaDeviceSynchronize();
+
+            if (err != cudaSuccess) {
+                printf("cudaMemcpy 5 failed: %s\n", cudaGetErrorString(err));
+            }
+
+            // Test on MATLAB to view raw data
+            if (0) {
+                ofstream myout;
+
+                myout.open("Output_interleaved.dat");
+
+                for (uint32_t i = 0; i < 2 * DATASIZE; i++) {
+
+                    //Print data to dat file:
+                    myout << i << " " << (float)h_interleaved[i] << endl;
+                    //myout << i << " " << i] << endl;
+                    //printf("i = %d\n", i);
+
+                }
+
+                myout.close();
+                //Display finish message:
+                cout << "Finished!" << endl;
+
+            }
+
+            printf("After interleaving, sample values: %f %f %f\n", h_interleaved[0], h_interleaved[1], h_interleaved[2]);
+
+            gpu_count_samples++;
+            printf("GPU count_samples after increment: %d\n", gpu_count_samples);
+        
+        }
+        else {
+            return;
+        }
+    }
+    else {
+        return;
+    }
+    
+
     if (0) {
         d_framing1 << <framing_blocks, framing_threads >> > (d_waveform, d_waveform1);
         cudaDeviceSynchronize();
@@ -767,10 +734,12 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
 
 
 
-    if (determinedPeriod > 1000) // i.e. determinedPeriod = 2000
+    if (determinedPeriod > 1000) {// i.e. determinedPeriod = 2000
         d_framing2 << < (int)framing_elements * 2, (int)determinedPeriod / 2 >> > (determinedPeriod, d_waveform, (cufftComplex*)d_frame, framing_elements, d_test);
-    else
+    }
+    else {
         d_framing << <framing_blocks, framing_threads >> > (determinedPeriod, d_waveform, (cufftComplex*)d_frame, framing_elements);
+    }
 
     cudaMemcpy(h_test, d_test, floatmem_size, cudaMemcpyDeviceToHost);
 
@@ -1733,6 +1702,7 @@ void kernel(int argc, char* argv[]) {
     cudaMalloc((void**)&d_frame, mem_size);
     cudaMalloc((void**)&d_waveform, floatmem_size);
     cudaMalloc((void**)&d_waveform1, floatmem_size);
+    cudaMalloc((void**)&d_interleaved, 2 * floatmem_size);
 
     //cudaMalloc((void**)&device_count_samples, sizeof(int));
 
