@@ -645,7 +645,7 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
                 printf("cudaMemcpy 3 failed: %s\n", cudaGetErrorString(err));
             }
 
-            printf("After cudaMemcpy, sample values: %f %f %f\n", h_test2[0], h_test2[10], h_test2[1000000]);
+            printf("After cudaMemcpy, sample values: %f %f %f\n", h_test2[0], h_test2[1], h_test2[2]);
 
             // Copy first waveform to d_waveform1
             err = cudaMemcpy(d_waveform1, d_waveform, sizeof(float) * DATASIZE, cudaMemcpyDeviceToDevice);
@@ -692,7 +692,7 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
             }
 
             // Test on MATLAB to view raw data
-            if (0) {
+            if (1) {
                 ofstream myout;
 
                 myout.open("Output_interleaved.dat");
@@ -711,7 +711,7 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
                 cout << "Finished!" << endl;
 
             }
-
+           
             printf("After interleaving, sample values: %f %f %f\n", h_interleaved[0], h_interleaved[1], h_interleaved[2]);
 
             gpu_count_samples++;
@@ -741,10 +741,12 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
 
 
     if (determinedPeriod > 1000) {// i.e. determinedPeriod = 2000
-        d_framing2 << < (int)framing_elements * 2, (int)determinedPeriod / 2 >> > (determinedPeriod, d_waveform, (cufftComplex*)d_frame, framing_elements, d_test);
+        // d_framing2 << < (int)framing_elements * 2, (int)determinedPeriod / 2 >> > (determinedPeriod, d_waveform, (cufftComplex*)d_frame, framing_elements, d_test);
+        d_framing2 << < (int)framing_elements * 2, (int)determinedPeriod / 2 >> > (determinedPeriod, d_interleaved, (cufftComplex*)d_frame, framing_elements, d_test);
     }
     else {
-        d_framing << <framing_blocks, framing_threads >> > (determinedPeriod, d_waveform, (cufftComplex*)d_frame, framing_elements);
+        // d_framing << <framing_blocks, framing_threads >> > (determinedPeriod, d_waveform, (cufftComplex*)d_frame, framing_elements);
+        d_framing << <framing_blocks, framing_threads >> > (determinedPeriod, d_interleaved, (cufftComplex*)d_frame, framing_elements);
     }
 
     cudaMemcpy(h_test, d_test, floatmem_size, cudaMemcpyDeviceToHost);
