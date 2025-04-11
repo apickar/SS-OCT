@@ -62,22 +62,22 @@
 //int recordsPerBuffer;
 //int buffersPerAcquisition;
 
-#define DATASIZE postTriggerSamples * recordsPerBuffer *  buffersPerAcquisition //6021972 //5929741 //XLENGTH * YLENGTH * ZLENGTH    // Amount of data points in each data set. // RECORD LENGTH
-#define NX   (int) (postTriggerSamples/2.0)//410 //150						// SHOULD BE THE AMOUNT OF POINTS FOR ONE SIGNAL. (LENGTH OF SIGNAL IN X DIMENSION ARRAY) // Maybe might be 10000 as it gives different kind of output plot that might be correct.
-#define BATCH    recordsPerBuffer *  buffersPerAcquisition //floor(DATASIZE/NX) //14687 //(DATASIZE/NX)					// BATCH is amount of mini transforms to do.
+#define DATASIZE postTriggerSamples * recordsPerBuffer *  buffersPerAcquisition // 20000000 // XLENGTH * YLENGTH * ZLENGTH    // Amount of data points in each data set. // RECORD LENGTH
+#define NX   (int) (postTriggerSamples/2.0) // 1000					// SHOULD BE THE AMOUNT OF POINTS FOR ONE SIGNAL. (LENGTH OF SIGNAL IN X DIMENSION ARRAY) // Maybe might be 10000 as it gives different kind of output plot that might be correct.
+#define BATCH    recordsPerBuffer *  buffersPerAcquisition // 10000 // floor(DATASIZE/NX) //(DATASIZE/NX) // BATCH is amount of mini transforms to do.
 #define FFT_DATA_MAXIMUM_VALUE 3000000//1000 //40000 //4086 //14000	//80000		//Represents the max value that is possible after FFT the data.
 #define DC_CUT_OFFSET 180 //12 chnaged to zero bc photoreceiver removes envelop
 float UPPER_NORMALIZATION_THRESHOLD = 10000.0f;//1.0f
 float LOWER_NORMALIZATION_THRESHOLD = 0.1f;//0.7f
 
 //Cube Coordinate Data Macros:
-#define XLENGTH recordsPerBuffer	//80 //198 //181 //X
-#define YLENGTH  ((floor(NX/2.0)) - DC_CUT_OFFSET) //212 //183 //181 // this is the length of pulses //Y
+#define XLENGTH recordsPerBuffer // 100 //X
+#define YLENGTH  ((floor(NX/2.0)) - DC_CUT_OFFSET) // 320 // this is the length of pulses //Y
 //#define YLENGTH ((floor(NX/2)))
-#define ZLENGTH	buffersPerAcquisition/2 //(floor(DATASIZE/(XLENGTH * YLENGTH))) //(floor(DATASIZE/(XLENGTH * YLENGTH))) //100	//80 //150 //80  //181 //Z
+#define ZLENGTH	buffersPerAcquisition/2 // 50 // (floor(DATASIZE/(XLENGTH * YLENGTH))) //(floor(DATASIZE/(XLENGTH * YLENGTH))) //Z
 //#define FRAMES	ZLENGTH	//150 //80  //181 
-#define TOTAL  XLENGTH * YLENGTH * ZLENGTH * 3
-#define COLORTOTAL XLENGTH * YLENGTH * ZLENGTH * 4
+#define TOTAL  XLENGTH * YLENGTH * ZLENGTH * 3 // 4800000
+#define COLORTOTAL XLENGTH * YLENGTH * ZLENGTH * 4 // 6400000
 
 //CHANGEABLE MAGNITUDE SETTINGS: //use these links for help in detemining proper values (https://en.wikipedia.org/wiki/CUDA) (https://stackoverflow.com/questions/4391162/cuda-determining-threads-per-block-blocks-per-grid)
 #define THREADS 1024
@@ -92,7 +92,7 @@ string dataFile = "OCTDATA.dat"; //use it to test the work
 //-----------------------------PERIOD GUESS DATA--------------------------
 //Editables:
 #define SIZE DATASIZE //3500 //take about 7 periods
-double periodGuess = postTriggerSamples; //Initial guess
+double periodGuess = postTriggerSamples; // 2000 //Initial guess
 double interp_factor = 1.0;//1.0f;
 double max_tolerance = 0.2;//0.2f;
 double min_tolerance = 0.05;//0.05f;
