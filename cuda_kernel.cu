@@ -63,13 +63,11 @@
 //int buffersPerAcquisition;
 
 #define DATASIZE postTriggerSamples * recordsPerBuffer *  buffersPerAcquisition // 20000000 // XLENGTH * YLENGTH * ZLENGTH    // Amount of data points in each data set. // RECORD LENGTH
-//#define NX   (int) (postTriggerSamples/2.0) // 1000					// SHOULD BE THE AMOUNT OF POINTS FOR ONE SIGNAL. (LENGTH OF SIGNAL IN X DIMENSION ARRAY) // Maybe might be 10000 as it gives different kind of output plot that might be correct.
-#define NX   (int) (postTriggerSamples) // 2000
-#define BATCH    recordsPerBuffer *  buffersPerAcquisition // 10000 // floor(DATASIZE/NX) //(DATASIZE/NX) // BATCH is amount of mini transforms to do.
+#define NX   (int) (postTriggerSamples) // 1000					// SHOULD BE THE AMOUNT OF POINTS FOR ONE SIGNAL. (LENGTH OF SIGNAL IN X DIMENSION ARRAY) // Maybe might be 10000 as it gives different kind of output plot that might be correct.
+#define BATCH    recordsPerBuffer *  buffersPerAcquisition * 2 // 10000 // floor(DATASIZE/NX) //(DATASIZE/NX) // BATCH is amount of mini transforms to do.
 //#define BATCH    recordsPerBuffer *  buffersPerAcquisition * 2 // 20000
 #define FFT_DATA_MAXIMUM_VALUE 3000000//1000 //40000 //4086 //14000	//80000		//Represents the max value that is possible after FFT the data.
-//#define DC_CUT_OFFSET 180 //12 chnaged to zero bc photoreceiver removes envelop
-#define DC_CUT_OFFSET 360 //12 chnaged to zero bc photoreceiver removes envelop
+#define DC_CUT_OFFSET 180 //12 chnaged to zero bc photoreceiver removes envelop
 float UPPER_NORMALIZATION_THRESHOLD = 10000.0f;//1.0f
 float LOWER_NORMALIZATION_THRESHOLD = 0.1f;//0.7f
 
@@ -739,25 +737,34 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
 
 
 
-    if (determinedPeriod > 1000) {// i.e. determinedPeriod = 2000
+   // if (determinedPeriod > 1000) {// i.e. determinedPeriod = 2000
         // <20000, 1000>
         // d_framing2 << < (int)framing_elements * 2, (int)determinedPeriod / 2 >> > (determinedPeriod, d_waveform, (cufftComplex*)d_frame, framing_elements, d_test);
-        // < 20000, 2000>
-        d_framing2 << < (int)framing_elements, (int)determinedPeriod / 2 >> > (determinedPeriod, d_interleaved, (cufftComplex*)d_frame, framing_elements, d_test);
-    }
-    else {
-        // d_framing << <framing_blocks, framing_threads >> > (determinedPeriod, d_waveform, (cufftComplex*)d_frame, framing_elements);
-        d_framing << <framing_blocks, framing_threads >> > (determinedPeriod, d_interleaved, (cufftComplex*)d_frame, framing_elements);
+        // < 40000, 1000 >
+        d_framing2 << < 40000, 1000 >> > (2000, d_interleaved, (cufftComplex*)d_frame, 20000, d_test);
+    //}
+    //else {
+    //    // d_framing << <framing_blocks, framing_threads >> > (determinedPeriod, d_waveform, (cufftComplex*)d_frame, framing_elements);
+    //    d_framing << <framing_blocks, framing_threads >> > (determinedPeriod, d_interleaved, (cufftComplex*)d_frame, framing_elements);
+    //}
+
+    err = cudaMemcpy(h_test, d_test, 2 * floatmem_size, cudaMemcpyDeviceToHost);
+
+    cudaDeviceSynchronize();
+
+    if (err != cudaSuccess) {
+        printf("cudaMemcpy for d_test failed: %s\n", cudaGetErrorString(err));
     }
 
-    cudaMemcpy(h_test, d_test, floatmem_size, cudaMemcpyDeviceToHost);
+    printf("After interleaving, sample values: %f %f %f %f\n", h_interleaved[0], h_interleaved[1], h_interleaved[2], h_interleaved[3]);
+    printf("After copying d_test, h_test values: %f %f %f %f\n", h_test[0], h_test[1], h_test[2], h_test[3]);
 
     if (0) {
         ofstream myout;
 
-        myout.open("FFT_Output2.dat");
+        myout.open("d_test_plot.dat");
 
-        for (uint32_t i = 0; i < DATASIZE / 2; i++) {
+        for (uint32_t i = 0; i < DATASIZE; i++) {
 
             //Print data to dat file:
             myout << i << " " << (float)h_test[i] << endl;
@@ -805,7 +812,7 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
         printf("BATCH %d\n", BATCH);
 
 
-        print_kernel_float << <1, 1 >> > (d_data);
+        print_kernel_complex << <1, 1 >> > (d_data);
     }
 
     if (0) {
@@ -814,22 +821,26 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
         MessageBox(0, buffer, "Title", MB_OK);
     }
 
-    cudaMemcpy(d_test, h_test, floatmem_size1, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_normalize, h_test1, floatmem_size1, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_test, h_test, floatmem_size*2, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_normalize, h_test1, floatmem_size*2, cudaMemcpyHostToDevice);
     //d_test = d_test1;
-    if (determinedPeriod > 1000) // i.e. determinedPeriod = 2000
-        // < 500, 320>
+    //if (determinedPeriod > 1000) // i.e. determinedPeriod = 2000
+        // < 5000, 320>
         //d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, (int)(DATASIZE / 2), d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
-        d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, (int)(DATASIZE), d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
-    else
-        d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, DATASIZE, d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
+        //d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, (int)(DATASIZE), d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
+        // <10000, 1820> 
+        d_magnitude << < 10000, 320 >> > (d_data, dptr, (int)(DATASIZE), d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
+    //else
+        //d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, DATASIZE, d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
 
     if (N == N_AVE) { N = 1; }
     else { N = N + 1; }
 
+
+
     //d_test1 = d_test;
-    cudaMemcpy(h_test, d_test, floatmem_size1, cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_test1, d_normalize, floatmem_size1, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_test, d_test, floatmem_size*2, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_test1, d_normalize, floatmem_size*2, cudaMemcpyDeviceToHost);
 
     //printf("%f", );
     if (0) {
@@ -1714,8 +1725,8 @@ void kernel(int argc, char* argv[]) {
     //cudaMalloc((void**)&d_test, floatmem_size1);
     //cudaMalloc((void**)&d_test1, floatmem_size1);
 
-    cudaMalloc((void**)&d_test, floatmem_size);
-    cudaMalloc((void**)&d_test1, floatmem_size);
+    cudaMalloc((void**)&d_test, floatmem_size * 2);
+    cudaMalloc((void**)&d_test1, floatmem_size * 2);
 
     //cudaMalloc((void**)&d_frame, mem_size);
     //cudaMalloc((void**)&d_waveform, floatmem_size);
@@ -1741,7 +1752,7 @@ void kernel(int argc, char* argv[]) {
     //cufftPlan1d(&plan, NX, CUFFT_C2C, BATCH); // ARG 2 AND 4 MUST EQUATE TO TOTAL NUMBER OF DATA POINTS IN D_DATA (ARG2 * ARG4 = LENGTH(D_DATA))
 
     //CUFFT1Dmany plan (supports multiple batch):
-    if (0) {
+    if (1) {
         printf("%d\n", nn[0]);
         printf("%d\n", nn[1]);
         printf("%d\n", NX);
@@ -1749,7 +1760,10 @@ void kernel(int argc, char* argv[]) {
         printf("%d\n", inembed[0]);
     }
 
-    cufftPlanMany(&plan, 1, nn, inembed, 1, NX, onembed, 1, NX, CUFFT_C2C, (int)BATCH);
+    // (.., .., .., .., .., 2000, .., .., 2000, .., 10000)
+    //cufftPlanMany(&plan, 1, nn, inembed, 1, NX, onembed, 1, NX, CUFFT_C2C, (int)BATCH);
+    // (.., .., .., .., .., 4000, .., .., 4000, .., 10000)
+    cufftPlanMany(&plan, 1, nn, inembed, 1, 2000, onembed, 1, 2000, CUFFT_C2C, 10000);
 
     /*
 
@@ -1780,7 +1794,7 @@ void kernel(int argc, char* argv[]) {
     // GPU Version: // NEED 2D BLOCKS AND THREADS FOR THE GPU FUNCTION
     //framing_elements = std::floor(recordsPerBuffer * buffersPerAcquisition);// (std::floor(DATASIZE / determinedPeriod) - 1);
 
-    framing_elements = std::floor(recordsPerBuffer * buffersPerAcquisition * 2);// (std::floor(DATASIZE / determinedPeriod) - 1);
+    framing_elements = std::floor(recordsPerBuffer * buffersPerAcquisition);// (std::floor(DATASIZE / determinedPeriod) - 1);
 
     //int kNum = (std::floor(n * determinedPeriod) + std::floor(determinedPeriod));
     framing_threads = std::floor(determinedPeriod);
