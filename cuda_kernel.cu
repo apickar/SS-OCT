@@ -63,8 +63,8 @@
 //int buffersPerAcquisition;
 
 #define DATASIZE postTriggerSamples * recordsPerBuffer *  buffersPerAcquisition // 20000000 // XLENGTH * YLENGTH * ZLENGTH    // Amount of data points in each data set. // RECORD LENGTH
-#define NX   (int) (postTriggerSamples) // 1000					// SHOULD BE THE AMOUNT OF POINTS FOR ONE SIGNAL. (LENGTH OF SIGNAL IN X DIMENSION ARRAY) // Maybe might be 10000 as it gives different kind of output plot that might be correct.
-#define BATCH    recordsPerBuffer *  buffersPerAcquisition * 2 // 10000 // floor(DATASIZE/NX) //(DATASIZE/NX) // BATCH is amount of mini transforms to do.
+#define NX   (int) (postTriggerSamples) // 2000					// SHOULD BE THE AMOUNT OF POINTS FOR ONE SIGNAL. (LENGTH OF SIGNAL IN X DIMENSION ARRAY) // Maybe might be 10000 as it gives different kind of output plot that might be correct.
+#define BATCH    recordsPerBuffer *  buffersPerAcquisition // 10000 // floor(DATASIZE/NX) //(DATASIZE/NX) // BATCH is amount of mini transforms to do.
 //#define BATCH    recordsPerBuffer *  buffersPerAcquisition * 2 // 20000
 #define FFT_DATA_MAXIMUM_VALUE 3000000//1000 //40000 //4086 //14000	//80000		//Represents the max value that is possible after FFT the data.
 #define DC_CUT_OFFSET 180 //12 chnaged to zero bc photoreceiver removes envelop
@@ -137,7 +137,7 @@ double* ahead;
 int N = 1;
 
 //-----------------------------CUDA Constants-----------------------------
-int nn[1] = { NX };
+int nn[1] = { 4000 };
 int inembed[] = { 0 };
 int onembed[] = { 0 };
 
@@ -302,8 +302,10 @@ float translate_z = -5.0; //-3.0 controls zoom in and out
 __global__ void d_magnitude(cufftComplex* data, float4* result, int numElements, float* testdata, float* normalize_result, int CONTRAST, int N, float UPPER_NORMALIZATION_THRESHOLD, float LOWER_NORMALIZATION_THRESHOLD, int N_AVE) {
 
     int j = blockDim.x * blockIdx.x + threadIdx.x;
-    int i = (NX * blockIdx.x) + (DC_CUT_OFFSET)+threadIdx.x; //where the first term "410" is the period of each fft and third term "11" is how much to offset - 1 so in this case the offset is actually 12 to get rid of DC portion of FFT.
+    int i =  (4000 * blockIdx.x) + (DC_CUT_OFFSET)+threadIdx.x; //where the first term "410" is the period of each fft and third term "11" is how much to offset - 1 so in this case the offset is actually 12 to get rid of DC portion of FFT.
     //int i = (NX * blockIdx.x) + threadIdx.x;
+    //testdata[j] = 20;
+
 
     if (i < numElements) {
         //result[i] = 0;
@@ -328,19 +330,20 @@ __global__ void d_magnitude(cufftComplex* data, float4* result, int numElements,
         //printf("%f , ", testdata[j]);
         if (N_AVE == 1) {
             result[j] = make_float4(0.7f, 0.498039f, 0.196078f, test1); //GOLD
+            testdata[j] = test1;
         }
         else if (N < N_AVE) {
-            testdata[j] = (testdata[j] + test1);
+            testdata[j] = 10;// (testdata[j] + test1);
             //printf("%f. \n", testdata[j]);
             result[j] = make_float4(0.7f, 0.498039f, 0.196078f, normalize_result[j]); //GOLD result[j] = normalize_result[j];
         }
         else {
             result[j] = make_float4(0.7f, 0.498039f, 0.196078f, testdata[j] / N_AVE); //GOLD
             normalize_result[j] = result[j].w;
-            testdata[j] = 0;
+            testdata[j] = 20;
         }
 
-
+        
 
 
 
@@ -465,7 +468,7 @@ __global__ void d_framing2(double determinedPeriod, float* waveform, cufftComple
 
 // DEBUG CUDA PRINT FUNCTION:
 __global__ void print_kernel(float* waveform) {
-    printf("GPU: %f\n", (float)waveform[500]);
+    printf("d_data after d_mag: %f\n", (float)waveform[500]);
 }
 
 __global__ void print_kernel_complex(cufftComplex* waveform) {
@@ -719,10 +722,10 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
 
             }
 
-            printf("After interleaving, sample values: %f %f %f\n", h_interleaved[0], h_interleaved[1], h_interleaved[2]);
+            //printf("After interleaving, sample values: %f %f %f\n", h_interleaved[0], h_interleaved[1], h_interleaved[2]);
 
             gpu_count_samples++;
-            printf("GPU count_samples after increment: %d\n", gpu_count_samples);
+            //printf("GPU count_samples after increment: %d\n", gpu_count_samples);
         }
     }
 
@@ -748,16 +751,16 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
     //    d_framing << <framing_blocks, framing_threads >> > (determinedPeriod, d_interleaved, (cufftComplex*)d_frame, framing_elements);
     //}
 
-    err = cudaMemcpy(h_test, d_test, 2 * floatmem_size, cudaMemcpyDeviceToHost);
+   // err = cudaMemcpy(h_test, d_test, 2 * floatmem_size, cudaMemcpyDeviceToHost);
 
     cudaDeviceSynchronize();
 
-    if (err != cudaSuccess) {
-        printf("cudaMemcpy for d_test failed: %s\n", cudaGetErrorString(err));
-    }
+    //if (err != cudaSuccess) {
+        //printf("cudaMemcpy for d_test failed: %s\n", cudaGetErrorString(err));
+    //}
 
-    printf("After interleaving, sample values: %f %f %f %f\n", h_interleaved[0], h_interleaved[1], h_interleaved[2], h_interleaved[3]);
-    printf("After copying d_test, h_test values: %f %f %f %f\n", h_test[0], h_test[1], h_test[2], h_test[3]);
+    //printf("After interleaving, sample values: %f %f %f %f\n", h_interleaved[0], h_interleaved[1], h_interleaved[2], h_interleaved[3]);
+   // printf("After copying d_test, h_test values: %f %f %f %f\n", h_test[0], h_test[1], h_test[2], h_test[3]);
 
     if (0) {
         ofstream myout;
@@ -791,7 +794,7 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
 
     cufftExecC2C(plan, (cufftComplex*)d_frame, (cufftComplex*)d_data, CUFFT_FORWARD);
 
-    //print_kernel_complex << <1, 1 >> > (d_data);
+    print_kernel_complex << <1, 1 >> > (d_data);
     //TEST
     //cudaMemcpy(h_data, d_data, mem_size, cudaMemcpyDeviceToHost);
 
@@ -821,17 +824,24 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
         MessageBox(0, buffer, "Title", MB_OK);
     }
 
-    cudaMemcpy(d_test, h_test, floatmem_size*2, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_normalize, h_test1, floatmem_size*2, cudaMemcpyHostToDevice);
+   // cudaMemcpy(d_test, h_test, floatmem_size*2, cudaMemcpyHostToDevice);
+    //cudaMemcpy(d_normalize, h_test1, floatmem_size*2, cudaMemcpyHostToDevice);
     //d_test = d_test1;
     //if (determinedPeriod > 1000) // i.e. determinedPeriod = 2000
         // < 5000, 320>
         //d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, (int)(DATASIZE / 2), d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
         //d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, (int)(DATASIZE), d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
-        // <10000, 1820> 
-        d_magnitude << < 10000, 320 >> > (d_data, dptr, (int)(DATASIZE), d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
+        // <10000, 820> 
+        d_magnitude << < 5000, 820 >> > (d_data, dptr, 40000000, d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
     //else
         //d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, DATASIZE, d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
+        print_kernel << <1, 1 >> > (d_test);
+
+    cudaMemcpy(h_test, d_test, 10000*1820*sizeof(float), cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
+
+
+    printf("After d_magnitude, sample values: %f %f %f\n", h_test[0], h_test[1], h_test[20000]);
 
     if (N == N_AVE) { N = 1; }
     else { N = N + 1; }
@@ -839,8 +849,8 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
 
 
     //d_test1 = d_test;
-    cudaMemcpy(h_test, d_test, floatmem_size*2, cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_test1, d_normalize, floatmem_size*2, cudaMemcpyDeviceToHost);
+  //  cudaMemcpy(h_test, d_test, floatmem_size*2, cudaMemcpyDeviceToHost);
+    //cudaMemcpy(h_test1, d_normalize, floatmem_size*2, cudaMemcpyDeviceToHost);
 
     //printf("%f", );
     if (0) {
@@ -1631,7 +1641,7 @@ void timerEvent(int value)
 
 void kernel(int argc, char* argv[]) {
     // Allocate Pinned Memory for buffer variable:
-    cudaHostAlloc((void**)&h_data, mem_size, cudaHostAllocMapped); //can be commented out
+    cudaHostAlloc((void**)&h_data, mem_size*2, cudaHostAllocMapped); //can be commented out
     //cudaHostAlloc((void**)&pSamples, sizeof(uint16_t) * (DATASIZE), cudaHostAllocMapped);
     //cudaHostGetDevicePointer(&d_pinned_data, sampleValues_copy, 0);
 
@@ -1760,10 +1770,10 @@ void kernel(int argc, char* argv[]) {
         printf("%d\n", inembed[0]);
     }
 
-    // (.., .., .., .., .., 2000, .., .., 2000, .., 10000)
+    // (.., .., .., .., .., 1000, .., .., 1000, .., 10000)
     //cufftPlanMany(&plan, 1, nn, inembed, 1, NX, onembed, 1, NX, CUFFT_C2C, (int)BATCH);
-    // (.., .., .., .., .., 4000, .., .., 4000, .., 10000)
-    cufftPlanMany(&plan, 1, nn, inembed, 1, 2000, onembed, 1, 2000, CUFFT_C2C, 10000);
+    // (.., .., .., .., .., 2000, .., .., 2000, .., 20000)
+    cufftPlanMany(&plan, 1, nn, inembed, 1, 4000, onembed, 1, 4000, CUFFT_C2C, 10000);
 
     /*
 
