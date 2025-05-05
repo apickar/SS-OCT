@@ -137,7 +137,7 @@ double* ahead;
 int N = 1;
 
 //-----------------------------CUDA Constants-----------------------------
-int nn[1] = { 4000 };
+int nn[1] = { 2000 };
 int inembed[] = { 0 };
 int onembed[] = { 0 };
 
@@ -302,7 +302,7 @@ float translate_z = -5.0; //-3.0 controls zoom in and out
 __global__ void d_magnitude(cufftComplex* data, float4* result, int numElements, float* testdata, float* normalize_result, int CONTRAST, int N, float UPPER_NORMALIZATION_THRESHOLD, float LOWER_NORMALIZATION_THRESHOLD, int N_AVE) {
 
     int j = blockDim.x * blockIdx.x + threadIdx.x;
-    int i =  (4000 * blockIdx.x) + (DC_CUT_OFFSET)+threadIdx.x; //where the first term "410" is the period of each fft and third term "11" is how much to offset - 1 so in this case the offset is actually 12 to get rid of DC portion of FFT.
+    int i = (2000 * blockIdx.x) + (DC_CUT_OFFSET)+threadIdx.x; //where the first term "410" is the period of each fft and third term "11" is how much to offset - 1 so in this case the offset is actually 12 to get rid of DC portion of FFT.
     //int i = (NX * blockIdx.x) + threadIdx.x;
     //testdata[j] = 20;
 
@@ -343,7 +343,7 @@ __global__ void d_magnitude(cufftComplex* data, float4* result, int numElements,
             testdata[j] = 20;
         }
 
-        
+
 
 
 
@@ -740,11 +740,11 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
 
 
 
-   // if (determinedPeriod > 1000) {// i.e. determinedPeriod = 2000
-        // <20000, 1000>
-        // d_framing2 << < (int)framing_elements * 2, (int)determinedPeriod / 2 >> > (determinedPeriod, d_waveform, (cufftComplex*)d_frame, framing_elements, d_test);
-        // < 40000, 1000 >
-        d_framing2 << < 40000, 1000 >> > (2000, d_interleaved, (cufftComplex*)d_frame, 20000, d_test);
+    // if (determinedPeriod > 1000) {// i.e. determinedPeriod = 2000
+         // <20000, 1000>
+         // d_framing2 << < (int)framing_elements * 2, (int)determinedPeriod / 2 >> > (determinedPeriod, d_waveform, (cufftComplex*)d_frame, framing_elements, d_test);
+         // < 40000, 1000 >
+    d_framing2 << < 40000, 1000 >> > (2000, d_interleaved, (cufftComplex*)d_frame, 40000, d_test);
     //}
     //else {
     //    // d_framing << <framing_blocks, framing_threads >> > (determinedPeriod, d_waveform, (cufftComplex*)d_frame, framing_elements);
@@ -794,7 +794,7 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
 
     cufftExecC2C(plan, (cufftComplex*)d_frame, (cufftComplex*)d_data, CUFFT_FORWARD);
 
-    print_kernel_complex << <1, 1 >> > (d_data);
+    //print_kernel_complex << <1, 1 >> > (d_data);
     //TEST
     //cudaMemcpy(h_data, d_data, mem_size, cudaMemcpyDeviceToHost);
 
@@ -824,20 +824,20 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
         MessageBox(0, buffer, "Title", MB_OK);
     }
 
-   // cudaMemcpy(d_test, h_test, floatmem_size*2, cudaMemcpyHostToDevice);
+    //cudaMemcpy(d_test, h_test, floatmem_size*2, cudaMemcpyHostToDevice);
     //cudaMemcpy(d_normalize, h_test1, floatmem_size*2, cudaMemcpyHostToDevice);
-    //d_test = d_test1;
-    //if (determinedPeriod > 1000) // i.e. determinedPeriod = 2000
-        // < 5000, 320>
-        //d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, (int)(DATASIZE / 2), d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
-        //d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, (int)(DATASIZE), d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
-        // <10000, 820> 
-        d_magnitude << < 5000, 820 >> > (d_data, dptr, 40000000, d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
+     //d_test = d_test1;
+     //if (determinedPeriod > 1000) // i.e. determinedPeriod = 2000
+         // < 5000, 320>
+         //d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, (int)(DATASIZE / 2), d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
+         //d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, (int)(DATASIZE), d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
+         // <5000, 820> 
+    d_magnitude << < 5000, 820 >> > (d_data, dptr, 40000000, d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
     //else
         //d_magnitude << < (XLENGTH * ZLENGTH), YLENGTH >> > (d_data, dptr, DATASIZE, d_test, d_normalize, CONTRAST, N, UPPER_NORMALIZATION_THRESHOLD, LOWER_NORMALIZATION_THRESHOLD, N_AVE);
-        print_kernel << <1, 1 >> > (d_test);
+    //print_kernel << <1, 1 >> > (d_test);
 
-    cudaMemcpy(h_test, d_test, 10000*1820*sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_test, d_test, 10000 * 820 * sizeof(float), cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
 
 
@@ -849,7 +849,7 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
 
 
     //d_test1 = d_test;
-  //  cudaMemcpy(h_test, d_test, floatmem_size*2, cudaMemcpyDeviceToHost);
+    //cudaMemcpy(h_test, d_test, floatmem_size*2, cudaMemcpyDeviceToHost);
     //cudaMemcpy(h_test1, d_normalize, floatmem_size*2, cudaMemcpyDeviceToHost);
 
     //printf("%f", );
@@ -1641,7 +1641,7 @@ void timerEvent(int value)
 
 void kernel(int argc, char* argv[]) {
     // Allocate Pinned Memory for buffer variable:
-    cudaHostAlloc((void**)&h_data, mem_size*2, cudaHostAllocMapped); //can be commented out
+    cudaHostAlloc((void**)&h_data, mem_size * 2, cudaHostAllocMapped); //can be commented out
     //cudaHostAlloc((void**)&pSamples, sizeof(uint16_t) * (DATASIZE), cudaHostAllocMapped);
     //cudaHostGetDevicePointer(&d_pinned_data, sampleValues_copy, 0);
 
@@ -1773,7 +1773,7 @@ void kernel(int argc, char* argv[]) {
     // (.., .., .., .., .., 1000, .., .., 1000, .., 10000)
     //cufftPlanMany(&plan, 1, nn, inembed, 1, NX, onembed, 1, NX, CUFFT_C2C, (int)BATCH);
     // (.., .., .., .., .., 2000, .., .., 2000, .., 20000)
-    cufftPlanMany(&plan, 1, nn, inembed, 1, 4000, onembed, 1, 4000, CUFFT_C2C, 10000);
+    cufftPlanMany(&plan, 1, nn, inembed, 1, 2000, onembed, 1, 2000, CUFFT_C2C, 10000);
 
     /*
 
