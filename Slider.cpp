@@ -15,6 +15,22 @@
 #include "SliderDoc.h"
 #include "SliderView.h"
 
+#include <windows.h>
+#include <iostream>
+
+void InitConsole()
+{
+    AllocConsole();
+    freopen("CONOUT$", "w", stdout);  // Redirect stdout
+    freopen("CONOUT$", "w", stderr);  // Redirect stderr
+    std::cout.clear();
+    std::cerr.clear();
+    std::clog.clear();
+    std::wcout.clear();
+    std::wcerr.clear();
+    std::wclog.clear();
+}
+
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #undef THIS_FILE
@@ -93,11 +109,17 @@ int* pSamples = (int*)pBuffer;
 int ACQUIRE_RUN = 1;
 
 int N_AVE = 1;
+
 int serialNo = 29251544;
 
-short voltage1 = 0;      // 0 µm
-short voltage2 = 8167;   // 5 µm (Assuming 32767 = 75 V = 20 um)
-short currentVoltage = voltage1; // Start at voltage1
+const short voltage1 = -8192; // -5 um to bring it back
+const short voltage2 = 0;      // 0 µm
+const short voltage3 = 8192;   // 5 µm = 8167 (Assuming 32767 = 75 V = 20 um)
+short currentVoltage = voltage2; // Start at voltage1
+
+const short MAX_OUTPUT_VOLTAGE = 750;
+
+int count_samples = 1; // Host-side counter
 
 thread worker;
 
@@ -127,6 +149,10 @@ double SampleToVoltsU16(U16 sampleValue, double inputRange_volts)
 
 BOOL ConfigureBoard(HANDLE boardHandle, int VOLTAGE_LEVEL_idx1)
 {
+
+    InitConsole();
+    printf("Console attached!\n");
+
     RETURN_CODE retCode;
 
     // TODO: Specify the sample rate (see sample rate id below)
@@ -288,277 +314,348 @@ BOOL ConfigureBoard(HANDLE boardHandle, int VOLTAGE_LEVEL_idx1)
 
 void AcquireData()
 {
+    char testSerialNo[16];
+    sprintf_s(testSerialNo, "%d", serialNo);
 
-    while (ACQUIRE_RUN)
-    {
-        try
-        {
-            //cout << "Next round" << endl;
-        //vector<double> vv2(samplesPerBuffer);
-        // TODO: Select which channels to capture (A, B, or both)
-            U32 channelMask = CHANNEL_A;
+    if (TLI_BuildDeviceList() == 0) {
+        char serialNos[100];
+        TLI_GetDeviceListByTypeExt(serialNos, 100, 29);
 
-            // TODO: Select if you wish to save the sample data to a file
-            BOOL saveData = true; // false;
+        if (PCC_Open(testSerialNo) == 0) {
+            PCC_StartPolling(testSerialNo, 333);
+            PCC_SetPositionControlMode(testSerialNo, PZ_ControlModeTypes::PZ_OpenLoop);
+            PCC_SetMaxOutputVoltage(testSerialNo, MAX_OUTPUT_VOLTAGE);
 
-            // Calculate the number of enabled channels from the channel mask
-            int channelCount = 0;
-            int channelsPerBoard = 2;
-            for (int channel = 0; channel < channelsPerBoard; channel++)
+            while (ACQUIRE_RUN)
             {
-                U32 channelId = 1U << channel;
-                if (channelMask & channelId)
-                    channelCount++;
-            }
-            channelCount = 1;
-
-            // Get the sample size in bits, and the on-board memory size in samples per channel
-            U8 bitsPerSample;
-            U32 maxSamplesPerChannel;
-            RETURN_CODE retCode = AlazarGetChannelInfo(boardHandle, &maxSamplesPerChannel, &bitsPerSample);
-            if (retCode != ApiSuccess)
-            {
-                printf("Error: AlazarGetChannelInfo failed -- %s\n", AlazarErrorToText(retCode));
-                //return FALSE;
-            }
-
-            // Calculate the size of each DMA buffer in bytes
-            float bytesPerSample = (float)((bitsPerSample + 7) / 8);
-            U32 samplesPerRecord = preTriggerSamples + postTriggerSamples;
-            U32 bytesPerRecord = (U32)(bytesPerSample * samplesPerRecord +
-                0.5); // 0.5 compensates for double to integer conversion 
-            U32 bytesPerBuffer = bytesPerRecord * recordsPerBuffer * channelCount;
-
-            //Create our buffer
-
-            //U16* our_buffer[buffersPerAcquisition][samplesPerBuffer] = { NULL };
-            //std::vector<double*> our_buffer(samplesPerAcquasition,0);
-            //our_buffer.prototype.fill(0);
-            vector<double> our_buffer;
-            //our_buffer.reserve(samplesPerAcquasition);
-            // Create a data file if required
-            FILE* fpData = NULL;
-
-
-
-            if (saveData)
-            {
-                fpData = fopen("data.bin", "wb");//, std::fstream::trunc | std::fstream::out | std::fstream::app);
-                if (fpData == NULL)
+                try
                 {
-                    printf("Error: Unable to create data file -- %u\n", GetLastError());
-                    //return FALSE;
-                }
-            }
+                    //cout << "Next round" << endl;
+                //vector<double> vv2(samplesPerBuffer);
+                // TODO: Select which channels to capture (A, B, or both)
+                    U32 channelMask = CHANNEL_A;
 
+                    // TODO: Select if you wish to save the sample data to a file
+                    BOOL saveData = true; // false;
 
+                    // Calculate the number of enabled channels from the channel mask
+                    int channelCount = 0;
+                    int channelsPerBoard = 2;
+                    for (int channel = 0; channel < channelsPerBoard; channel++)
+                    {
+                        U32 channelId = 1U << channel;
+                        if (channelMask & channelId)
+                            channelCount++;
+                    }
+                    channelCount = 1;
 
-
-
-            // Allocate memory for DMA buffers
-            BOOL success = TRUE;
-
-            U32 bufferIndex;
-            for (bufferIndex = 0; (bufferIndex < BUFFER_COUNT) && success; bufferIndex++)
-            {
-                // Allocate page aligned memory
-                BufferArray[bufferIndex] =
-                    (U16*)AlazarAllocBufferU16(boardHandle, bytesPerBuffer);
-                if (BufferArray[bufferIndex] == NULL)
-                {
-                    printf("Error: Alloc %u bytes failed\n", bytesPerBuffer);
-                    success = FALSE;
-                }
-            }
-
-
-            // Configure the record size
-            if (success)
-            {
-                retCode = AlazarSetRecordSize(boardHandle, preTriggerSamples, postTriggerSamples);
-                if (retCode != ApiSuccess)
-                {
-                    printf("Error: AlazarSetRecordSize failed -- %s\n", AlazarErrorToText(retCode));
-                    success = FALSE;
-                }
-            }
-
-            // Configure the board to make an NPT AutoDMA acquisition
-            if (success)
-            {
-                U32 recordsPerAcquisition = recordsPerBuffer * buffersPerAcquisition;
-
-                U32 admaFlags = ADMA_EXTERNAL_STARTCAPTURE | ADMA_NPT | ADMA_FIFO_ONLY_STREAMING;
-
-                retCode = AlazarBeforeAsyncRead(boardHandle, channelMask, -(long)preTriggerSamples,
-                    samplesPerRecord, recordsPerBuffer, recordsPerAcquisition,
-                    admaFlags);
-                if (retCode != ApiSuccess)
-                {
-                    printf("Error: AlazarBeforeAsyncRead failed -- %s\n", AlazarErrorToText(retCode));
-                    success = FALSE;
-                }
-            }
-
-            U32 buffers_per = (U32)buffersPerAcquisition;
-            retCode = AlazarSetParameterUL(boardHandle, CHANNEL_ALL, SET_BUFFERS_PER_TRIGGER_ENABLE, buffers_per);
-            if (retCode != ApiSuccess)
-            {
-                printf("Error: SET_BUFFERS_PER_TRIGGER_ENABLE failed -- %s\n", AlazarErrorToText(retCode));
-                //return FALSE;
-            }
-
-            // Add the buffers to a list of buffers available to be filled by the board
-
-            for (bufferIndex = 0; (bufferIndex < BUFFER_COUNT) && success; bufferIndex++)
-            {
-                U16* pBuffer = BufferArray[bufferIndex];
-                retCode = AlazarPostAsyncBuffer(boardHandle, pBuffer, bytesPerBuffer);
-                if (retCode != ApiSuccess)
-                {
-                    printf("Error: AlazarPostAsyncBuffer %u failed -- %s\n", bufferIndex,
-                        AlazarErrorToText(retCode));
-                    success = FALSE;
-                }
-            }
-
-
-
-            // Arm the board system to wait for a trigger event to begin the acquisition
-            if (success)
-            {
-                retCode = AlazarStartCapture(boardHandle);
-                if (retCode != ApiSuccess)
-                {
-                    printf("Error: AlazarStartCapture failed -- %s\n", AlazarErrorToText(retCode));
-                    success = FALSE;
-                }
-            }
-
-
-            if (success)
-            {
-                //printf("Capturing %d buffers ... press any key to abort\n", buffersPerAcquisition);
-
-                U32 startTickCount = GetTickCount();
-                U32 buffersCompleted = 0;
-                INT64 bytesTransferred = 0;
-
-                //U32 start_clock = GetTickCount();
-
-                while (buffersCompleted < buffersPerAcquisition)
-                {
-                    //U32 save_start = GetTickCount();
-                    //retCode = AlazarSetParameter(boardHandle, CHANNEL_B, GET_AUX_INPUT_LEVEL, aux_level??);
-                   // printf("aux value --%ld\n", retCode);
-
-                    //printf("aux value --%lu -- %ld\n",aux, aux_level);
-
-                    // TODO: Set a buffer timeout that is longer than the time
-                    //       required to capture all the records in one buffer.
-                    U32 timeout_ms = 5000;
-
-                    // Wait for the buffer at the head of the list of available buffers
-                    // to be filled by the board.
-                    bufferIndex = buffersCompleted % BUFFER_COUNT;
-                    U16* pBuffer = BufferArray[bufferIndex];
-
-
-                    retCode = AlazarWaitAsyncBufferComplete(boardHandle, pBuffer, timeout_ms);
-                    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-
+                    // Get the sample size in bits, and the on-board memory size in samples per channel
+                    U8 bitsPerSample;
+                    U32 maxSamplesPerChannel;
+                    RETURN_CODE retCode = AlazarGetChannelInfo(boardHandle, &maxSamplesPerChannel, &bitsPerSample);
                     if (retCode != ApiSuccess)
                     {
-                        printf("Error: AlazarWaitAsyncBufferComplete failed -- %s\n",
-                            AlazarErrorToText(retCode));
-                        success = FALSE;
+                        printf("Error: AlazarGetChannelInfo failed -- %s\n", AlazarErrorToText(retCode));
+                        //return FALSE;
                     }
-                    U32 startTickCount = GetTickCount();
+
+                    // Calculate the size of each DMA buffer in bytes
+                    float bytesPerSample = (float)((bitsPerSample + 7) / 8);
+                    U32 samplesPerRecord = preTriggerSamples + postTriggerSamples;
+                    U32 bytesPerRecord = (U32)(bytesPerSample * samplesPerRecord +
+                        0.5); // 0.5 compensates for double to integer conversion 
+                    U32 bytesPerBuffer = bytesPerRecord * recordsPerBuffer * channelCount;
+
+                    //Create our buffer
+
+                    //U16* our_buffer[buffersPerAcquisition][samplesPerBuffer] = { NULL };
+                    //std::vector<double*> our_buffer(samplesPerAcquasition,0);
+                    //our_buffer.prototype.fill(0);
+                    vector<double> our_buffer;
+                    //our_buffer.reserve(samplesPerAcquasition);
+                    // Create a data file if required
+                    FILE* fpData = NULL;
+
+
+
+                    if (saveData)
+                    {
+                        fpData = fopen("data.bin", "wb");//, std::fstream::trunc | std::fstream::out | std::fstream::app);
+                        if (fpData == NULL)
+                        {
+                            printf("Error: Unable to create data file -- %u\n", GetLastError());
+                            //return FALSE;
+                        }
+                    }
+
+
+
+
+
+                    // Allocate memory for DMA buffers
+                    BOOL success = TRUE;
+
+                    U32 bufferIndex;
+                    for (bufferIndex = 0; (bufferIndex < BUFFER_COUNT) && success; bufferIndex++)
+                    {
+                        // Allocate page aligned memory
+                        BufferArray[bufferIndex] =
+                            (U16*)AlazarAllocBufferU16(boardHandle, bytesPerBuffer);
+                        if (BufferArray[bufferIndex] == NULL)
+                        {
+                            printf("Error: Alloc %u bytes failed\n", bytesPerBuffer);
+                            success = FALSE;
+                        }
+                    }
+
+
+                    // Configure the record size
+                    if (success)
+                    {
+                        retCode = AlazarSetRecordSize(boardHandle, preTriggerSamples, postTriggerSamples);
+                        if (retCode != ApiSuccess)
+                        {
+                            printf("Error: AlazarSetRecordSize failed -- %s\n", AlazarErrorToText(retCode));
+                            success = FALSE;
+                        }
+                    }
+
+                    // Configure the board to make an NPT AutoDMA acquisition
+                    if (success)
+                    {
+                        U32 recordsPerAcquisition = recordsPerBuffer * buffersPerAcquisition;
+
+                        U32 admaFlags = ADMA_EXTERNAL_STARTCAPTURE | ADMA_NPT | ADMA_FIFO_ONLY_STREAMING;
+
+                        retCode = AlazarBeforeAsyncRead(boardHandle, channelMask, -(long)preTriggerSamples,
+                            samplesPerRecord, recordsPerBuffer, recordsPerAcquisition,
+                            admaFlags);
+                        if (retCode != ApiSuccess)
+                        {
+                            printf("Error: AlazarBeforeAsyncRead failed -- %s\n", AlazarErrorToText(retCode));
+                            success = FALSE;
+                        }
+                    }
+
+                    U32 buffers_per = (U32)buffersPerAcquisition;
+                    retCode = AlazarSetParameterUL(boardHandle, CHANNEL_ALL, SET_BUFFERS_PER_TRIGGER_ENABLE, buffers_per);
+                    if (retCode != ApiSuccess)
+                    {
+                        printf("Error: SET_BUFFERS_PER_TRIGGER_ENABLE failed -- %s\n", AlazarErrorToText(retCode));
+                        //return FALSE;
+                    }
+
+                    // Add the buffers to a list of buffers available to be filled by the board
+
+                    for (bufferIndex = 0; (bufferIndex < BUFFER_COUNT) && success; bufferIndex++)
+                    {
+                        U16* pBuffer = BufferArray[bufferIndex];
+                        retCode = AlazarPostAsyncBuffer(boardHandle, pBuffer, bytesPerBuffer);
+                        if (retCode != ApiSuccess)
+                        {
+                            printf("Error: AlazarPostAsyncBuffer %u failed -- %s\n", bufferIndex,
+                                AlazarErrorToText(retCode));
+                            success = FALSE;
+                        }
+                    }
+
+
+
+                    // Arm the board system to wait for a trigger event to begin the acquisition
+                    if (success)
+                    {
+                        retCode = AlazarStartCapture(boardHandle);
+                        if (retCode != ApiSuccess)
+                        {
+                            printf("Error: AlazarStartCapture failed -- %s\n", AlazarErrorToText(retCode));
+                            success = FALSE;
+                        }
+                    }
+
 
                     if (success)
                     {
-                        // The buffer is full and has been removed from the list
-                        // of buffers available for the board
+                        //printf("Capturing %d buffers ... press any key to abort\n", buffersPerAcquisition);
 
-                        buffersCompleted++;
-                        bytesTransferred += bytesPerBuffer;
+                        U32 startTickCount = GetTickCount();
+                        U32 buffersCompleted = 0;
+                        INT64 bytesTransferred = 0;
 
-                        //vector<U16> vals(pBuffer, pBuffer + samplesPerBuffer);
+                        //U32 start_clock = GetTickCount();
 
-
-                                        //double* vv2 = new double[tt];
-                        //const void* pSamples = (void*)pBuffer;
-
-
-                        if (1)
+                        while (buffersCompleted < buffersPerAcquisition)
                         {
-                            U16* pSamples = (U16*)pBuffer;
+                            //U32 save_start = GetTickCount();
+                            //retCode = AlazarSetParameter(boardHandle, CHANNEL_B, GET_AUX_INPUT_LEVEL, aux_level??);
+                           // printf("aux value --%ld\n", retCode);
 
-                            //U16* vv2 = new U16[tt];
-                            for (U32 sample = (int)(0 + samplesPerBuffer * (buffersCompleted - 1)); sample < (samplesPerBuffer + samplesPerBuffer * (buffersCompleted - 1)); sample++) {
-                                //U16 sampleValue = (U16) *pSamples++;
-                                sampleValues[sample] = (float)*pSamples++; // ((U16)*pSamples++ - 28500) / 40;
-                                //our_buffer.push_back(sampleValue);
-                                //printf("sample value = %d ,  %X\n", sample, sampleValue);
+                            //printf("aux value --%lu -- %ld\n",aux, aux_level);
 
-                                //vv2[sample] = SampleToVoltsU16(sampleValue, 400.0);
-                            }
+                            // TODO: Set a buffer timeout that is longer than the time
+                            //       required to capture all the records in one buffer.
+                            U32 timeout_ms = 5000;
 
-                        }
-
-
-
-                        // TODO: Process sample data in this buffer.
-
-                        // NOTE:
-                        //
-                        // While you are processing this buffer, the board is already filling the next
-                        // available buffer(s).
-                        //
-                        // You MUST finish processing this buffer and post it back to the board before
-                        // the board fills all of its available DMA buffers and on-board memory.
-                        //
-                        // Samples are arranged in the buffer as follows: S0A, S0B, ..., S1A, S1B, ...
-                        // with SXY the sample number X of channel Y.
-                        //
-                        // A 12-bit sample code is stored in the most significant bits of in each 16-bit
-                        // sample value. 
-                        // Sample codes are unsigned by default. As a result:
-                        // - a sample code of 0x0000 represents a negative full scale input signal.
-                        // - a sample code of 0x8000 represents a ~0V signal.
-                        // - a sample code of 0xFFFF represents a positive full scale input signal.  
-
-                        // -- SEND DATA TO GPU ---
-                        //copy(vv2,vv2+(samplesPerBuffer*(buffersCompleted+1)), (double) (samplesPerBuffer * buffersCompleted));
-                        //U32 save_start = GetTickCount();
-                        //copy(vv2.begin(), vv2.end(), back_inserter(our_buffer));
-                        //U32 save_end = GetTickCount();
+                            // Wait for the buffer at the head of the list of available buffers
+                            // to be filled by the board.
+                            bufferIndex = buffersCompleted % BUFFER_COUNT;
+                            U16* pBuffer = BufferArray[bufferIndex];
 
 
-                        //printf("Save Time -- %u ms\n", save_end - save_start);
+                            retCode = AlazarWaitAsyncBufferComplete(boardHandle, pBuffer, timeout_ms);
+                            std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
 
-                        //.copy(0,samplesPerRecord,buffersCompleted*samplesPerRecord);
-                        //our_buffer[ii] = vv2;
-
-
-
-                        if (0)
-                        {
-                            // Write record to file
-
-
-                            size_t bytesWritten = fwrite(pSamples, sizeof(U8), bytesPerBuffer, fpData);
-                            if (bytesWritten != bytesPerBuffer)
+                            if (retCode != ApiSuccess)
                             {
-                                printf("Error: Write buffer %u failed -- %u\n", buffersCompleted,
-                                    GetLastError());
+                                printf("Error: AlazarWaitAsyncBufferComplete failed -- %s\n",
+                                    AlazarErrorToText(retCode));
                                 success = FALSE;
                             }
+                            U32 startTickCount = GetTickCount();
+
+                            if (success)
+                            {
+                                // The buffer is full and has been removed from the list
+                                // of buffers available for the board
+
+                                buffersCompleted++;
+                                bytesTransferred += bytesPerBuffer;
+
+                                //vector<U16> vals(pBuffer, pBuffer + samplesPerBuffer);
+
+
+                                                //double* vv2 = new double[tt];
+                                //const void* pSamples = (void*)pBuffer;
+
+
+                                if (1)
+                                {
+                                    U16* pSamples = (U16*)pBuffer;
+
+                                    //U16* vv2 = new U16[tt];
+                                    for (U32 sample = (int)(0 + samplesPerBuffer * (buffersCompleted - 1)); sample < (samplesPerBuffer + samplesPerBuffer * (buffersCompleted - 1)); sample++) {
+                                        //U16 sampleValue = (U16) *pSamples++;
+                                        sampleValues[sample] = (float)*pSamples++; // ((U16)*pSamples++ - 28500) / 40;
+                                        //our_buffer.push_back(sampleValue);
+                                        //printf("sample value = %d ,  %X\n", sample, sampleValue);
+
+                                        //vv2[sample] = SampleToVoltsU16(sampleValue, 400.0);
+                                    }
+
+                                }
+
+
+
+                                // TODO: Process sample data in this buffer.
+
+                                // NOTE:
+                                //
+                                // While you are processing this buffer, the board is already filling the next
+                                // available buffer(s).
+                                //
+                                // You MUST finish processing this buffer and post it back to the board before
+                                // the board fills all of its available DMA buffers and on-board memory.
+                                //
+                                // Samples are arranged in the buffer as follows: S0A, S0B, ..., S1A, S1B, ...
+                                // with SXY the sample number X of channel Y.
+                                //
+                                // A 12-bit sample code is stored in the most significant bits of in each 16-bit
+                                // sample value. 
+                                // Sample codes are unsigned by default. As a result:
+                                // - a sample code of 0x0000 represents a negative full scale input signal.
+                                // - a sample code of 0x8000 represents a ~0V signal.
+                                // - a sample code of 0xFFFF represents a positive full scale input signal.  
+
+                                // -- SEND DATA TO GPU ---
+                                //copy(vv2,vv2+(samplesPerBuffer*(buffersCompleted+1)), (double) (samplesPerBuffer * buffersCompleted));
+                                //U32 save_start = GetTickCount();
+                                //copy(vv2.begin(), vv2.end(), back_inserter(our_buffer));
+                                //U32 save_end = GetTickCount();
+
+
+                                //printf("Save Time -- %u ms\n", save_end - save_start);
+
+                                //.copy(0,samplesPerRecord,buffersCompleted*samplesPerRecord);
+                                //our_buffer[ii] = vv2;
+
+
+
+                                if (0)
+                                {
+                                    // Write record to file
+
+
+                                    size_t bytesWritten = fwrite(pSamples, sizeof(U8), bytesPerBuffer, fpData);
+                                    if (bytesWritten != bytesPerBuffer)
+                                    {
+                                        printf("Error: Write buffer %u failed -- %u\n", buffersCompleted,
+                                            GetLastError());
+                                        success = FALSE;
+                                    }
+                                }
+
+                                //U32 end_clock = GetTickCount();
+                                //double save_time = (end_clock - start_clock) * 1000;
+                                //printf("SAVE TIME -- %u\n", save_time);
+
+                                //DEBUG MODE:
+                                if (0) {
+                                    ofstream myout;
+
+                                    myout.open("FFT_Output.dat");
+
+                                    for (U32 i = 0; i < samplesPerBuffer; i++) {
+
+                                        //Print data to dat file:
+                                        //myout << i << " " << (float)sampleValues[i] << endl;
+                                        myout << i << " " << pSamples[i] << endl;
+
+                                    }
+
+                                    myout.close();
+                                    //Display finish message:
+                                    cout << "Finished!" << endl;
+
+                                }
+
+                            }
+
+                            // Add the buffer to the end of the list of available buffers.
+                            if (success)
+                            {
+                                retCode = AlazarPostAsyncBuffer(boardHandle, pBuffer, bytesPerBuffer);
+                                if (retCode != ApiSuccess)
+                                {
+                                    printf("Error: AlazarPostAsyncBuffer failed -- %s\n",
+                                        AlazarErrorToText(retCode));
+                                    // success = FALSE;
+                                }
+                            }
+
+                            // If the acquisition failed, exit the acquisition loop
+                            if (!success)
+                                break;
+
+                            // If a key was pressed, exit the acquisition loop
+                            if (_kbhit())
+                            {
+                                printf("Aborted...\n");
+                                break;
+                            }
+
+                            // Display progress
+                            //printf("Completed %u buffers\r", buffersCompleted);
+                            //std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+                            //std::cout << "Time elapsed = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "[ms]" << std::endl;
+
                         }
 
-                        //U32 end_clock = GetTickCount();
-                        //double save_time = (end_clock - start_clock) * 1000;
-                        //printf("SAVE TIME -- %u\n", save_time);
+                        //int arrSize = (sampleValues + 1) - &sampleValues;
+                        //printf("sampleValues length (CPU code) = %d\n", (int)(sizeof(sampleValues) / sizeof(float)));
+                        //printf("sampleValues length (CPU code) = %d\n", arrSize);
+
+                        memcpy(sampleValues_copy, sampleValues, sizeof(float)* samplesPerAcquasition);  
+
+                       printf("sampleValues_copy test: %f %f %f\n", sampleValues_copy[0], sampleValues_copy[1], sampleValues_copy[100]);
 
                         //DEBUG MODE:
                         if (0) {
@@ -566,11 +663,11 @@ void AcquireData()
 
                             myout.open("FFT_Output.dat");
 
-                            for (U32 i = 0; i < samplesPerBuffer; i++) {
+                            for (U32 i = 0; i < samplesPerAcquasition; i++) {
 
                                 //Print data to dat file:
-                                //myout << i << " " << (float)sampleValues[i] << endl;
-                                myout << i << " " << pSamples[i] << endl;
+                                myout << i << " " << (float)sampleValues[i] << endl;
+                                //myout << i << " " << i] << endl;
 
                             }
 
@@ -580,154 +677,85 @@ void AcquireData()
 
                         }
 
+                        // Display results
+                        double transferTime_sec = (GetTickCount() - startTickCount) / 1000.;
+                        //printf("Capture completed in %.2lf sec\n", transferTime_sec);
+
+                        double buffersPerSec;
+                        double bytesPerSec;
+                        double recordsPerSec;
+                        U32 recordsTransferred = recordsPerBuffer * buffersCompleted;
+
+                        if (transferTime_sec > 0.)
+                        {
+                            buffersPerSec = buffersCompleted / transferTime_sec;
+                            bytesPerSec = bytesTransferred / transferTime_sec;
+                            recordsPerSec = recordsTransferred / transferTime_sec;
+                        }
+                        else
+                        {
+                            buffersPerSec = 0.;
+                            bytesPerSec = 0.;
+                            recordsPerSec = 0.;
+                        }
+
+                        //printf("Captured %u buffers (%.4g buffers per sec)\n", buffersCompleted, buffersPerSec);
+                        //printf("Captured %u records (%.4g records per sec)\n", recordsTransferred, recordsPerSec);
+                        //printf("Transferred %I64d bytes (%.4g bytes per sec)\n", bytesTransferred, bytesPerSec);
                     }
 
-                    // Add the buffer to the end of the list of available buffers.
-                    if (success)
+                    // Abort the acquisition
+                    retCode = AlazarAbortAsyncRead(boardHandle);
+                    if (retCode != ApiSuccess)
                     {
-                        retCode = AlazarPostAsyncBuffer(boardHandle, pBuffer, bytesPerBuffer);
-                        if (retCode != ApiSuccess)
+                        printf("Error: AlazarAbortAsyncRead failed -- %s\n", AlazarErrorToText(retCode));
+                        success = FALSE;
+                    }
+
+                    // Free all memory allocated
+                    for (bufferIndex = 0; bufferIndex < BUFFER_COUNT; bufferIndex++)
+                    {
+                        if (BufferArray[bufferIndex] != NULL)
                         {
-                            printf("Error: AlazarPostAsyncBuffer failed -- %s\n",
-                                AlazarErrorToText(retCode));
-                            // success = FALSE;
+                            AlazarFreeBufferU16(boardHandle, BufferArray[bufferIndex]);
+
                         }
                     }
 
-                    // If the acquisition failed, exit the acquisition loop
-                    if (!success)
-                        break;
+                    // Close the data file
 
-                    // If a key was pressed, exit the acquisition loop
-                    if (_kbhit())
-                    {
-                        printf("Aborted...\n");
-                        break;
-                    }
-
-                    // Display progress
-                    //printf("Completed %u buffers\r", buffersCompleted);
-                    //std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-                    //std::cout << "Time elapsed = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "[ms]" << std::endl;
+                    if (fpData != NULL)
+                        fclose(fpData);
 
                 }
 
-                //int arrSize = (sampleValues + 1) - &sampleValues;
-                //printf("sampleValues length (CPU code) = %d\n", (int)(sizeof(sampleValues) / sizeof(float)));
-                //printf("sampleValues length (CPU code) = %d\n", arrSize);
 
-                sampleValues_copy = sampleValues;
-
-                //DEBUG MODE:
-                if (0) {
-                    ofstream myout;
-
-                    myout.open("FFT_Output.dat");
-
-                    for (U32 i = 0; i < samplesPerAcquasition; i++) {
-
-                        //Print data to dat file:
-                        myout << i << " " << (float)sampleValues[i] << endl;
-                        //myout << i << " " << i] << endl;
-
-                    }
-
-                    myout.close();
-                    //Display finish message:
-                    cout << "Finished!" << endl;
-
-                }
-
-                // Display results
-                double transferTime_sec = (GetTickCount() - startTickCount) / 1000.;
-                //printf("Capture completed in %.2lf sec\n", transferTime_sec);
-
-                double buffersPerSec;
-                double bytesPerSec;
-                double recordsPerSec;
-                U32 recordsTransferred = recordsPerBuffer * buffersCompleted;
-
-                if (transferTime_sec > 0.)
+                catch (int e)
                 {
-                    buffersPerSec = buffersCompleted / transferTime_sec;
-                    bytesPerSec = bytesTransferred / transferTime_sec;
-                    recordsPerSec = recordsTransferred / transferTime_sec;
-                }
-                else
-                {
-                    buffersPerSec = 0.;
-                    bytesPerSec = 0.;
-                    recordsPerSec = 0.;
+                    cout << "An exception occurred. Exception Nr. " << e << '\n';
                 }
 
-                //printf("Captured %u buffers (%.4g buffers per sec)\n", buffersCompleted, buffersPerSec);
-                //printf("Captured %u records (%.4g records per sec)\n", recordsTransferred, recordsPerSec);
-                //printf("Transferred %I64d bytes (%.4g bytes per sec)\n", bytesTransferred, bytesPerSec);
-            }
-
-            // Abort the acquisition
-            retCode = AlazarAbortAsyncRead(boardHandle);
-            if (retCode != ApiSuccess)
-            {
-                printf("Error: AlazarAbortAsyncRead failed -- %s\n", AlazarErrorToText(retCode));
-                success = FALSE;
-            }
-
-            // Free all memory allocated
-            for (bufferIndex = 0; bufferIndex < BUFFER_COUNT; bufferIndex++)
-            {
-                if (BufferArray[bufferIndex] != NULL)
-                {
-                    AlazarFreeBufferU16(boardHandle, BufferArray[bufferIndex]);
-
-                }
-            }
-
-            // Close the data file
-
-            if (fpData != NULL)
-                fclose(fpData);
-
-        }
-        catch (int e)
-        {
-            cout << "An exception occurred. Exception Nr. " << e << '\n';
-        }
-
-        // Move the slider here
-
-        auto start = std::chrono::high_resolution_clock::now();
-
-        char testSerialNo[16];
-        sprintf_s(testSerialNo, "%d", serialNo);
-
-        if (TLI_BuildDeviceList() == 0) {
-            char serialNos[100];
-            TLI_GetDeviceListByTypeExt(serialNos, 100, 29);
-
-            if (PCC_Open(testSerialNo) == 0) {
-                PCC_StartPolling(testSerialNo, 100);
-                PCC_SetPositionControlMode(testSerialNo, PZ_ControlModeTypes::PZ_OpenLoop);
+                // Move the slider here
                 PCC_SetOutputVoltage(testSerialNo, currentVoltage);
-                Sleep(333);  // Wait for milliseconds before checking position
-                currentVoltage = (currentVoltage == voltage1) ? voltage2 : voltage1;
-
-                auto end = std::chrono::high_resolution_clock::now();
-
-                // Calculate the duration
-                std::chrono::duration<double> duration = end - start;
-
-                // Output the execution time in seconds
-                std::cout << "Execution time: " << duration.count() << " seconds" << std::endl;
+                if (currentVoltage == voltage3) {
+                    currentVoltage = voltage1;
+                }
+                else {
+                    currentVoltage = voltage3;
+                }
+                //count_samples++;
+                // Print the updated value of count_samples from host after increment
+                //printf("CPU count_samples after increment: %d\n", count_samples);
             }
-            //PCC_StopPolling(testSerialNo);
-            //PCC_Close(testSerialNo);
+
         }
 
-        
+
 
     }
     //return sampleValues;
+    PCC_StopPolling(testSerialNo);
+    PCC_Close(testSerialNo);
 }
 
 
