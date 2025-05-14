@@ -841,7 +841,7 @@ void runCuda(struct cudaGraphicsResource** vbo_resource)
     cudaDeviceSynchronize();
 
 
-    if (gpu_count_samples == 60) {
+    if (0) {
         ofstream myout;
 
         myout.open("fft_real_output.dat");
